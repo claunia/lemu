@@ -79,6 +79,7 @@ struct JensenMachineState {
     uint8_t dma_stop[8][3];
     uint8_t nmi_control, nmi_extended, nmi_mask;
     bool keyboard_locked;
+    bool board_id_on;
     bool nt_idle;
     bool s3_928;
     uint32_t s3_vram_mb;
@@ -808,9 +809,11 @@ static void jensen_init(MachineState *machine)
     memory_region_init(&s->isa_mem, OBJECT(s), "jensen-isa-memory", 4 * GiB);
     address_space_init(&s->io_as, &s->isa_io, "jensen-io");
     address_space_init(&s->mem_as, &s->isa_mem, "jensen-memory");
-    memory_region_init_io(&s->board_id, OBJECT(s), &jensen_board_id_ops, s,
-                          "jensen-system-board-id", 4);
-    memory_region_add_subregion(&s->isa_io, 0xc80, &s->board_id);
+    if (s->board_id_on) {
+        memory_region_init_io(&s->board_id, OBJECT(s), &jensen_board_id_ops,
+                              s, "jensen-system-board-id", 4);
+        memory_region_add_subregion(&s->isa_io, 0xc80, &s->board_id);
+    }
     bus = isa_bus_new(NULL, &s->isa_mem, &s->isa_io, &error_fatal);
     pic = i8259_init(bus, qdev_get_gpio_in(DEVICE(s->cpu),
                                          ALPHA_CPU_INPUT_IRQ1));
@@ -1010,6 +1013,16 @@ static void jensen_set_keyboard_locked(Object *obj, bool value, Error **errp)
     JENSEN_MACHINE(obj)->keyboard_locked = value;
 }
 
+static bool jensen_get_board_id(Object *obj, Error **errp)
+{
+    return JENSEN_MACHINE(obj)->board_id_on;
+}
+
+static void jensen_set_board_id(Object *obj, bool value, Error **errp)
+{
+    JENSEN_MACHINE(obj)->board_id_on = value;
+}
+
 static bool jensen_get_nt_idle(Object *obj, Error **errp)
 {
     return JENSEN_MACHINE(obj)->nt_idle;
@@ -1080,6 +1093,7 @@ static void jensen_instance_init(Object *obj)
 {
     JENSEN_MACHINE(obj)->s3_vram_mb = 2;
     JENSEN_MACHINE(obj)->nt_idle = true;
+    JENSEN_MACHINE(obj)->board_id_on = true;
 }
 
 static void jensen_finalize(Object *obj)
@@ -1136,6 +1150,12 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
                                    jensen_set_keyboard_locked);
     object_class_property_set_description(oc, "keyboard-locked",
         "Front-panel key-lock switch (default: unlocked)");
+    object_class_property_add_bool(oc, "board-id", jensen_get_board_id,
+                                   jensen_set_board_id);
+    object_class_property_set_description(oc, "board-id",
+        "Answer the system board EISA ID DEC2400 at I/O port 0xc80. "
+        "OpenVMS needs it off: it then takes slot 0 for empty "
+        "(default: on)");
     object_class_property_add_bool(oc, "nt-idle", jensen_get_nt_idle,
                                    jensen_set_nt_idle);
     object_class_property_set_description(oc, "nt-idle",
