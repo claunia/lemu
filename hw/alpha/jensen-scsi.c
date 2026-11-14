@@ -25,6 +25,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(JensenAha1742, JENSEN_AHA1742)
 #define AHA_QUEUE_SIZE 64
 #define AHA_MAX_SG 128
 #define AHA_COMMAND_DELAY_NS (100 * 1000)
+#define AHA_PRESENT_DELAY_NS (20 * 1000)
 #define AHA_DI 0x0080
 #define AHA_SES 0x0400
 #define AHA_SG 0x1000
@@ -64,12 +65,36 @@ struct JensenAha1742 {
     bool out_full, hard_reset;
     AhaCompletion done[AHA_QUEUE_SIZE];
     unsigned head, count, active;
+    /* The mailbox-in and interrupt status registers, and whether they
+     * hold done[head] with the interrupt pending (G2STAT.INTP). */
+    AhaCompletion shown;
+    bool presented;
+    QEMUTimer *present_timer;
     QTAILQ_HEAD(, AhaRequest) requests;
 };
 
 static void aha_update_irq(JensenAha1742 *s)
 {
-    qemu_set_irq(s->irq, s->count && (s->regs[0x42] & 0x10));
+    qemu_set_irq(s->irq, s->presented && (s->regs[0x42] & 0x10));
+}
+
+/*
+ * The adapter loads the next completion into the mailbox-in and interrupt
+ * status registers once the host has cleared the interrupt (G2CNTRL.IRST),
+ * a moment later. The registers keep the last completion after the clear:
+ * the Jensen SRM console clears the interrupt first and reads the status
+ * after it.
+ */
+static void aha_present(void *opaque)
+{
+    JensenAha1742 *s = opaque;
+
+    if (s->presented || !s->count || timer_pending(s->present_timer)) {
+        return;
+    }
+    s->shown = s->done[s->head];
+    s->presented = true;
+    aha_update_irq(s);
 }
 
 static void aha_post(JensenAha1742 *s, uint32_t mailbox, uint8_t status)
@@ -80,7 +105,7 @@ static void aha_post(JensenAha1742 *s, uint32_t mailbox, uint8_t status)
     s->done[tail].mailbox = mailbox;
     s->done[tail].status = status;
     s->count++;
-    aha_update_irq(s);
+    aha_present(s);
 }
 
 static void aha_finish(AhaRequest *r, uint8_t host, uint8_t target,
@@ -371,6 +396,9 @@ static void aha_reset_adapter(JensenAha1742 *s)
     s->mailbox_out = 0;
     s->out_full = s->hard_reset = false;
     s->head = s->count = 0;
+    timer_del(s->present_timer);
+    s->presented = false;
+    s->shown = (AhaCompletion){ 0 };
 }
 
 static void aha_reset(DeviceState *dev)
@@ -407,14 +435,14 @@ static uint8_t aha_read_byte(JensenAha1742 *s, unsigned reg)
         return s->mailbox_out >> ((reg - 0x50) * 8);
     }
     if (reg == 0x56) {
-        return s->count ? s->done[s->head].status : 0;
+        return s->shown.status;
     }
     if (reg == 0x57) {
-        return (s->hard_reset ? 1 : 0) | (s->count ? 2 : 0) |
+        return (s->hard_reset ? 1 : 0) | (s->presented ? 2 : 0) |
                (!s->out_full && s->count + s->active < AHA_QUEUE_SIZE ? 4 : 0);
     }
     if (reg >= 0x58 && reg <= 0x5b) {
-        return s->count ? s->done[s->head].mailbox >> ((reg - 0x58) * 8) : 0;
+        return s->shown.mailbox >> ((reg - 0x58) * 8);
     }
     if (reg == 0x5c) {
         return 0; /* Immediate reset consumes host-ready synchronously. */
@@ -471,11 +499,18 @@ static void aha_write_byte(JensenAha1742 *s, unsigned reg, uint8_t value)
             s->hard_reset = true;
         } else {
             s->hard_reset = false;
-            if ((value & 0x40) && s->count) {
-                qemu_set_irq(s->irq, 0);
+            /* IRST: the host took the completion shown; a second IRST
+             * before the next one is shown does nothing. */
+            if ((value & 0x40) && s->presented) {
+                s->presented = false;
                 s->head = (s->head + 1) % AHA_QUEUE_SIZE;
                 s->count--;
                 aha_update_irq(s);
+                if (s->count) {
+                    timer_mod(s->present_timer,
+                              qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                              AHA_PRESENT_DELAY_NS);
+                }
             }
         }
     } else if (reg == 0x42) {
@@ -531,6 +566,7 @@ static void aha_realize(DeviceState *dev, Error **errp)
         return;
     }
     QTAILQ_INIT(&s->requests);
+    s->present_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, aha_present, s);
     scsi_bus_init(&s->bus, sizeof(s->bus), dev, &aha_scsi_info);
     memory_region_init_io(&s->io, OBJECT(s), &aha_io_ops, s,
                           "aha1742-eisa", 0x80);
