@@ -36,8 +36,8 @@ commit.
 - `OUT/rc` must show exit code 0 for all four. The logs are in
   `OUT/*.log`.
 - Each binary has every feature that any of the five machine builds had.
-  qemu-system-hppa, qemu-system-i386 and qemu-system-sparc get the same
-  set.
+  qemu-system-hppa, qemu-system-i386, qemu-system-sparc and
+  qemu-system-m68k get the same set.
 - `build-mac.sh` prints the oldest macOS the binaries run on
   (`needs macOS ...`). The kit READMEs must say the same.
 
@@ -59,7 +59,7 @@ what each binary has in `OUT/macos-*.features` and
     sh stage.sh OUT STAGE
 
 `stage.sh` makes `STAGE` new. `STAGE/i386`, `STAGE/ppc`, `STAGE/ppc64`, `STAGE/alpha`,
-`STAGE/hppa` and `STAGE/sparc` each hold only their own binary. `STAGE/mips` has the
+`STAGE/hppa`, `STAGE/sparc` and `STAGE/m68k` each hold only their own binary. `STAGE/mips` has the
 folder names that `rm200/release/pack.sh` wants. Give the pack scripts
 these folders in place of their own build, for example:
 
