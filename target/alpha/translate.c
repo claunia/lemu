@@ -429,7 +429,32 @@ static void gen_store_conditional_common(DisasContext *s, TCGv_i64 val,
     TCGLabel *done_label = gen_new_label();
     TCGv_i64 res, tmp;
 
-    tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_llsc_addr, fail_label);
+    if (memop_size(memop) == 4) {
+        /*
+         * The lock covers at least the naturally aligned 16-byte block of
+         * the LDx_L (Alpha Architecture Reference Manual, 4.2.5). OpenVMS
+         * takes a shared lock with LDQ_L and stores the upper longword,
+         * the share count, with STL_C: compare and swap the whole
+         * quadword the LDQ_L read.
+         */
+        TCGLabel *exact_label = gen_new_label();
+        TCGv_i64 t = tcg_temp_new_i64();
+
+        tcg_gen_brcond_i64(TCG_COND_EQ, addr, cpu_llsc_addr, exact_label);
+        tcg_gen_andi_i64(t, cpu_llsc_addr, 7);
+        tcg_gen_brcondi_i64(TCG_COND_NE, t, 0, fail_label);
+        tcg_gen_addi_i64(t, cpu_llsc_addr, 4);
+        tcg_gen_brcond_i64(TCG_COND_NE, addr, t, fail_label);
+        tcg_gen_deposit_i64(t, cpu_llsc_val, val, 32, 32);
+        res = tcg_temp_new_i64();
+        tcg_gen_atomic_cmpxchg_i64(res, cpu_llsc_addr, cpu_llsc_val, t,
+                                   mmu_idx, (memop & ~MO_SIZE) | MO_64);
+        tcg_gen_setcond_i64(TCG_COND_EQ, val, res, cpu_llsc_val);
+        tcg_gen_br(done_label);
+        gen_set_label(exact_label);
+    } else {
+        tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_llsc_addr, fail_label);
+    }
 
     /*
      * Zero extend the store comparison value based on the memory operation
