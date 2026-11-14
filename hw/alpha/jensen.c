@@ -24,6 +24,7 @@
 #include "hw/input/i8042.h"
 #include "hw/input/vmmouse-mmio.h"
 #include "hw/intc/i8259.h"
+#include "hw/intc/kvm_irqcount.h"
 #include "hw/isa/isa.h"
 #include "hw/core/irq.h"
 #include "hw/core/loader.h"
@@ -89,6 +90,7 @@ struct JensenMachineState {
     uint8_t inta_vector;
     bool inta_second;
     MC146818RtcState *rtc;
+    bool rtc_irq_level;
     uint8_t rtc_index, rtc_ram[JENSEN_RTC_RAM_SIZE];
     char *rtc_ram_file;
     FILE *rtc_file;
@@ -652,6 +654,34 @@ static void jensen_local_irq(void *opaque, int n, int level)
                  (s->local_irqs & 12) != 0);
 }
 
+/*
+ * The RTC's periodic interrupt is the clock tick of VMS (1024 a second) and
+ * NT (128 a second). On macOS QEMU's main loop waits in whole milliseconds,
+ * so a tick can come while the last one still waits for the guest to read
+ * register C. The guest then counts one tick for two, and its clock runs
+ * slow. Tell the RTC when a tick finds the line still up, so its slew policy
+ * gives it again. It gives back at most a quarter second of ticks: a guest
+ * that leaves the tick waiting longer, as VMS does at its date prompt, loses
+ * the rest, as on the real machine.
+ */
+#define JENSEN_RTC_MAX_LOST 8192 /* a quarter second in 32768 Hz RTC clocks */
+
+static void jensen_rtc_irq(void *opaque, int n, int level)
+{
+    JensenMachineState *s = opaque;
+
+    if (level) {
+        bool lost = s->rtc_irq_level &&
+                    (uint64_t)s->rtc->irq_coalesced * s->rtc->period <
+                    JENSEN_RTC_MAX_LOST;
+
+        kvm_report_irq_delivered(!lost);
+    }
+    s->rtc_irq_level = level;
+    qemu_set_irq(qdev_get_gpio_in(DEVICE(s->cpu), ALPHA_CPU_INPUT_IRQ0),
+                 level);
+}
+
 /* Complete the interrupt-controller handoff normally done by SROM$357_INIT. */
 static void jensen_srom_init_pic(JensenMachineState *s)
 {
@@ -840,8 +870,7 @@ static void jensen_init(MachineState *machine)
     qdev_prop_set_int32(DEVICE(rtc), "base_year", 1980);
     isa_realize_and_unref(rtc, bus, &error_fatal);
     qdev_connect_gpio_out(DEVICE(rtc), 0,
-                          qdev_get_gpio_in(DEVICE(s->cpu),
-                                           ALPHA_CPU_INPUT_IRQ0));
+                          qemu_allocate_irq(jensen_rtc_irq, s, 0));
     s->rtc = MC146818_RTC(rtc);
     address_space_init(&s->rtc_as, &s->rtc->io, "jensen-rtc-device");
     memory_region_init_io(&s->rtc_window, OBJECT(s), &jensen_rtc_ops, s,
@@ -1116,6 +1145,7 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
         { "isa-i8259", "edge-irq-withdrawal", "on" },
         { "isa-i8259", "ltim-supported", "off" },
         { "mc146818rtc", "pf-without-pie", "on" },
+        { "mc146818rtc", "lost_tick_policy", "slew" },
         { "i8042", "selftest-reply-first", "on" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1132,6 +1162,7 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
     mc->max_cpus = 1;
     mc->no_floppy = false;
     mc->no_parallel = true;
+    mc->lost_tick_slew = true;
     object_class_property_add_bool(oc, "s3-928", jensen_get_s3_928,
                                    jensen_set_s3_928);
     object_class_property_set_description(oc, "s3-928",
