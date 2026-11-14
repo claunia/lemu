@@ -386,7 +386,8 @@ static inline bool alpha_get_asten(CPUAlphaState *env)
 {
     switch (env->implver) {
     case IMPLVER_2106x:
-        return IPR_EX64(sier, EV4_SIER, SIER) & BIT(IPL_AST);
+        /* SIER<2>: the SIER field starts at level 1. VMS PAL clears it at IPL 2. */
+        return IPR_EX64(sier, EV4_SIER, SIER) & BIT(IPL_AST - 1);
     case IMPLVER_21164:
         return alpha_ipl_test(env, IPL_AST);
     case IMPLVER_21264:

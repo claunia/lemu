@@ -3,8 +3,8 @@
 `-M jensen` is DEC's first Alpha PC: an EV4 CPU, EISA, the 82357
 interrupt and DMA controller, an Adaptec AHA-1742 SCSI adapter, and an
 S3 86C928 video card with a Bt485 RAMDAC. It runs the DEC V2.2 firmware
-(ARC 4.31) and Windows NT 3.1 and 4.0 for Alpha. Windows 2000 dropped the
-Jensen.
+(ARC 4.31 and the SRM console), Windows NT 3.1, 3.51 and 4.0 for Alpha,
+and OpenVMS AXP V1.5-1H1. Windows 2000 dropped the Jensen.
 
 | Folder | What |
 |---|---|
@@ -22,6 +22,7 @@ Jensen.
 | `rtc-ram-file=rtc.bin` | keeps the 66 bytes of battery-backed RAM in a file |
 | `keyboard-locked=on` | the front panel key lock |
 | `nt-idle=off` | let NT's idle loop spin; by default QEMU halts the CPU while NT is idle, so an idle VM uses about 2% of a host core |
+| `board-id=off` | no system board EISA ID at port 0xc80; OpenVMS needs it off, else it reads slot 0's configuration and crashes (INVEXCEPTN) |
 
 ## Files
 
@@ -44,3 +45,27 @@ Jensen.
   machines unchanged: `edge-irq-withdrawal` and `ltim-supported=off` on
   the 8259, `pf-without-pie` on the RTC and `selftest-reply-first` on the
   i8042.
+- The RTC's periodic interrupt is the clock tick of NT (128 a second) and
+  VMS (1024 a second). On macOS QEMU's main loop waits in whole
+  milliseconds, and two ticks that come before the guest answers the first
+  reach it as one: VMS's clock ran 24% slow. The jensen machine therefore
+  uses the RTC's `slew` lost tick policy, which gives such ticks again, up
+  to a quarter second of them. `-global mc146818rtc.lost_tick_policy=discard`
+  turns it off.
+
+## OpenVMS
+
+OpenVMS AXP V1.5-1H1 boots from the SRM console (`b dka0`). It needs:
+
+- `-M jensen,board-id=off`.
+- On the AHA-1742 disk: `quirk_mode_page_rw_error_vms=on` and
+  `quirk_mode_page_format_device=on`.
+- On the CD (an RRD42): `physical_block_size=512`,
+  `quirk_mode_page_set_block_size=on`, `quirk_mode_sense_rom_use_dbd=on`,
+  `quirk_mode_page_rw_error_vms=on`, `quirk_mode_sense_rom_wp=on`,
+  `scsi_version=2`, `vendor=DEC`, `product='RRD42   (C) DEC'`, `ver=4.5d`.
+- The SRM console moves the RTC's year from the ARC count (from 1980) to the
+  VMS one (from 1900) at power-on. The jensen machine starts the RTC in
+  binary mode, as the firmware leaves it. In BCD the console read 1998 as
+  2004, wrote year 4, and VMS asked for the date and time at every start.
+- VMS has no driver for the emulated network cards.

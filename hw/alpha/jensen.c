@@ -24,12 +24,14 @@
 #include "hw/input/i8042.h"
 #include "hw/input/vmmouse-mmio.h"
 #include "hw/intc/i8259.h"
+#include "hw/intc/kvm_irqcount.h"
 #include "hw/isa/isa.h"
 #include "hw/core/irq.h"
 #include "hw/core/loader.h"
 #include "hw/core/qdev-clock.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/rtc/mc146818rtc.h"
+#include "hw/rtc/mc146818rtc_regs.h"
 #include "hw/timer/i8254.h"
 #include "hw/timer/i8254_internal.h"
 #include "system/blockdev.h"
@@ -79,6 +81,7 @@ struct JensenMachineState {
     uint8_t dma_stop[8][3];
     uint8_t nmi_control, nmi_extended, nmi_mask;
     bool keyboard_locked;
+    bool board_id_on;
     bool nt_idle;
     bool s3_928;
     uint32_t s3_vram_mb;
@@ -88,6 +91,7 @@ struct JensenMachineState {
     uint8_t inta_vector;
     bool inta_second;
     MC146818RtcState *rtc;
+    bool rtc_irq_level;
     uint8_t rtc_index, rtc_ram[JENSEN_RTC_RAM_SIZE];
     char *rtc_ram_file;
     FILE *rtc_file;
@@ -651,6 +655,34 @@ static void jensen_local_irq(void *opaque, int n, int level)
                  (s->local_irqs & 12) != 0);
 }
 
+/*
+ * The RTC's periodic interrupt is the clock tick of VMS (1024 a second) and
+ * NT (128 a second). On macOS QEMU's main loop waits in whole milliseconds,
+ * so a tick can come while the last one still waits for the guest to read
+ * register C. The guest then counts one tick for two, and its clock runs
+ * slow. Tell the RTC when a tick finds the line still up, so its slew policy
+ * gives it again. It gives back at most a quarter second of ticks: a guest
+ * that leaves the tick waiting longer, as VMS does at its date prompt, loses
+ * the rest, as on the real machine.
+ */
+#define JENSEN_RTC_MAX_LOST 8192 /* a quarter second in 32768 Hz RTC clocks */
+
+static void jensen_rtc_irq(void *opaque, int n, int level)
+{
+    JensenMachineState *s = opaque;
+
+    if (level) {
+        bool lost = s->rtc_irq_level &&
+                    (uint64_t)s->rtc->irq_coalesced * s->rtc->period <
+                    JENSEN_RTC_MAX_LOST;
+
+        kvm_report_irq_delivered(!lost);
+    }
+    s->rtc_irq_level = level;
+    qemu_set_irq(qdev_get_gpio_in(DEVICE(s->cpu), ALPHA_CPU_INPUT_IRQ0),
+                 level);
+}
+
 /* Complete the interrupt-controller handoff normally done by SROM$357_INIT. */
 static void jensen_srom_init_pic(JensenMachineState *s)
 {
@@ -808,9 +840,11 @@ static void jensen_init(MachineState *machine)
     memory_region_init(&s->isa_mem, OBJECT(s), "jensen-isa-memory", 4 * GiB);
     address_space_init(&s->io_as, &s->isa_io, "jensen-io");
     address_space_init(&s->mem_as, &s->isa_mem, "jensen-memory");
-    memory_region_init_io(&s->board_id, OBJECT(s), &jensen_board_id_ops, s,
-                          "jensen-system-board-id", 4);
-    memory_region_add_subregion(&s->isa_io, 0xc80, &s->board_id);
+    if (s->board_id_on) {
+        memory_region_init_io(&s->board_id, OBJECT(s), &jensen_board_id_ops,
+                              s, "jensen-system-board-id", 4);
+        memory_region_add_subregion(&s->isa_io, 0xc80, &s->board_id);
+    }
     bus = isa_bus_new(NULL, &s->isa_mem, &s->isa_io, &error_fatal);
     pic = i8259_init(bus, qdev_get_gpio_in(DEVICE(s->cpu),
                                          ALPHA_CPU_INPUT_IRQ1));
@@ -837,9 +871,16 @@ static void jensen_init(MachineState *machine)
     qdev_prop_set_int32(DEVICE(rtc), "base_year", 1980);
     isa_realize_and_unref(rtc, bus, &error_fatal);
     qdev_connect_gpio_out(DEVICE(rtc), 0,
-                          qdev_get_gpio_in(DEVICE(s->cpu),
-                                           ALPHA_CPU_INPUT_IRQ0));
+                          qemu_allocate_irq(jensen_rtc_irq, s, 0));
     s->rtc = MC146818_RTC(rtc);
+    /*
+     * The battery keeps register B, and the firmware leaves the clock in
+     * binary mode. At power-on the SRM console reads the year before it sets
+     * that mode, to move it from the ARC count (from 1980) to the VMS one
+     * (from 1900). It read QEMU's BCD default as binary, made 1998 into 2004,
+     * and VMS asked for the date at every start.
+     */
+    s->rtc->cmos_data[RTC_REG_B] |= REG_B_DM;
     address_space_init(&s->rtc_as, &s->rtc->io, "jensen-rtc-device");
     memory_region_init_io(&s->rtc_window, OBJECT(s), &jensen_rtc_ops, s,
                           "jensen-vl82c106-rtc", 2);
@@ -1010,6 +1051,16 @@ static void jensen_set_keyboard_locked(Object *obj, bool value, Error **errp)
     JENSEN_MACHINE(obj)->keyboard_locked = value;
 }
 
+static bool jensen_get_board_id(Object *obj, Error **errp)
+{
+    return JENSEN_MACHINE(obj)->board_id_on;
+}
+
+static void jensen_set_board_id(Object *obj, bool value, Error **errp)
+{
+    JENSEN_MACHINE(obj)->board_id_on = value;
+}
+
 static bool jensen_get_nt_idle(Object *obj, Error **errp)
 {
     return JENSEN_MACHINE(obj)->nt_idle;
@@ -1080,6 +1131,7 @@ static void jensen_instance_init(Object *obj)
 {
     JENSEN_MACHINE(obj)->s3_vram_mb = 2;
     JENSEN_MACHINE(obj)->nt_idle = true;
+    JENSEN_MACHINE(obj)->board_id_on = true;
 }
 
 static void jensen_finalize(Object *obj)
@@ -1102,6 +1154,7 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
         { "isa-i8259", "edge-irq-withdrawal", "on" },
         { "isa-i8259", "ltim-supported", "off" },
         { "mc146818rtc", "pf-without-pie", "on" },
+        { "mc146818rtc", "lost_tick_policy", "slew" },
         { "i8042", "selftest-reply-first", "on" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1118,6 +1171,7 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
     mc->max_cpus = 1;
     mc->no_floppy = false;
     mc->no_parallel = true;
+    mc->lost_tick_slew = true;
     object_class_property_add_bool(oc, "s3-928", jensen_get_s3_928,
                                    jensen_set_s3_928);
     object_class_property_set_description(oc, "s3-928",
@@ -1136,6 +1190,12 @@ static void jensen_class_init(ObjectClass *oc, const void *data)
                                    jensen_set_keyboard_locked);
     object_class_property_set_description(oc, "keyboard-locked",
         "Front-panel key-lock switch (default: unlocked)");
+    object_class_property_add_bool(oc, "board-id", jensen_get_board_id,
+                                   jensen_set_board_id);
+    object_class_property_set_description(oc, "board-id",
+        "Answer the system board EISA ID DEC2400 at I/O port 0xc80. "
+        "OpenVMS needs it off: it then takes slot 0 for empty "
+        "(default: on)");
     object_class_property_add_bool(oc, "nt-idle", jensen_get_nt_idle,
                                    jensen_set_nt_idle);
     object_class_property_set_description(oc, "nt-idle",

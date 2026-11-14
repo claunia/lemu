@@ -266,5 +266,7 @@ bool scsi_generic_pr_state_cleanup(SCSIDevice *s, Error **errp);
 #define SCSI_DISK_QUIRK_MODE_PAGE_SET_BLOCK_SIZE           4
 #define SCSI_DISK_QUIRK_MODE_SELECT_IGNORE                 5
 #define SCSI_DISK_QUIRK_MODE_PAGE_FORMAT_DEVICE            6
+#define SCSI_DISK_QUIRK_MODE_PAGE_RW_ERROR_VMS             7
+#define SCSI_DISK_QUIRK_MODE_SENSE_ROM_WP                  8
 
 #endif

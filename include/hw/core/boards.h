@@ -232,6 +232,10 @@ typedef struct {
  *    should instead use "unimplemented-device" for all memory ranges where
  *    the guest will attempt to probe for a device that QEMU doesn't
  *    implement and a stub device is required.
+ * @lost_tick_slew:
+ *    true if the board tells the RTC with kvm_report_irq_delivered() whether
+ *    each of its interrupts got through, as the RTC's 'slew' lost tick
+ *    policy needs. x86 machines always allow 'slew'.
  * @kvm_type:
  *    Return the type of KVM corresponding to the kvm-type string option or
  *    computed based on other criteria such as the host kernel capabilities.
@@ -307,6 +311,7 @@ struct MachineClass {
     int minimum_page_bits;
     bool has_hotpluggable_cpus;
     bool ignore_memory_transaction_failures;
+    bool lost_tick_slew;
     int numa_mem_align_shift;
     const char * const *valid_cpu_types;
     GPtrArray *(*get_valid_cpu_types)(const MachineState *ms);
