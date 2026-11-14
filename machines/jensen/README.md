@@ -1,8 +1,9 @@
 # DEC Jensen (DECpc AXP 150, DEC 2000)
 
 `-M jensen` is DEC's first Alpha PC: an EV4 CPU, EISA, the 82357
-interrupt and DMA controller, an Adaptec AHA-1742 SCSI adapter, and an
-S3 86C928 video card with a Bt485 RAMDAC. It runs the DEC V2.2 firmware
+interrupt and DMA controller, an Adaptec AHA-1742 SCSI adapter, an
+S3 86C928 video card with a Bt485 RAMDAC and, if you add it, a DEC DE422
+network card. It runs the DEC V2.2 firmware
 (ARC 4.31 and the SRM console), Windows NT 3.1, 3.51 and 4.0 for Alpha,
 and OpenVMS AXP V1.5-1H1. Windows 2000 dropped the Jensen.
 
@@ -68,4 +69,26 @@ OpenVMS AXP V1.5-1H1 boots from the SRM console (`b dka0`). It needs:
   VMS one (from 1900) at power-on. The jensen machine starts the RTC in
   binary mode, as the firmware leaves it. In BCD the console read 1998 as
   2004, wrote year 4, and VMS asked for the date and time at every start.
-- VMS has no driver for the emulated network cards.
+- VMS's network card is the DE422 (`ERA0`, see below). With the card
+  but without its EISA configuration, VMS hangs at boot.
+
+## Network: DE422
+
+`-device jensen-de422,netdev=n0` adds a DEC DE422-SA EtherWORKS EISA
+card: an Am7990 LANCE with 64 KB of memory on the card. It sits in EISA
+slot 5 (`slot=1` to `6`) and takes `mac=` like any NIC. The firmware's
+power-up test checks it: `NI OK 52-54-00-12-34-56 DE422`. The card's
+128 KB mode is not there; OpenVMS does not use it.
+
+The EISA configuration must list the card before a system uses it. The
+ECU floppy `ecu18nt.img` (ECU V1.8) has its file, `!DEC4220.CFG`:
+
+1. Start with the floppy and without a boot disk, so the console stops
+   at `>>>` (Ctrl-C does not stop the autoboot).
+2. Type `runecu`. On a new feprom1 it opens the ARC setup menu first and
+   wants the yellow items done in order: set the default environment
+   variables, then the default configuration. Reset, then `runecu` again.
+3. In the ECU, step 2 shows the card in slot 5. Keep its defaults
+   (IRQ 5, memory D0000, 64 KB), then save and exit.
+
+The configuration is kept in feprom1.

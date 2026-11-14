@@ -48,6 +48,11 @@ jensen_aha_complete(uint32_t ecb, unsigned host, unsigned target, uint32_t resid
 jensen_aha_ecb(uint32_t ecb, unsigned flags, unsigned flags2, uint32_t data, uint32_t status, uint64_t cdb) "ecb=0x%x flags=0x%x flags2=0x%x data=0x%x status=0x%x cdb=0x%" PRIx64
 jensen_inta_read(uint64_t addr, unsigned size, unsigned vector) "addr=0x%" PRIx64 " size=%u vector=0x%x"
 
+# jensen-de422.c
+jensen_de422_read(uint64_t reg, uint64_t value, unsigned size) "reg=0x%" PRIx64 " value=0x%" PRIx64 " size=%u"
+jensen_de422_write(uint64_t reg, uint64_t value, unsigned size) "reg=0x%" PRIx64 " value=0x%" PRIx64 " size=%u"
+jensen_de422_dma(bool write, uint32_t addr, int len, uint64_t data) "write=%d addr=0x%04x len=%d data=0x%016" PRIx64
+
 # jensen-s3.c
 jensen_s3_cr(unsigned index, unsigned value, bool write) "index=0x%02x value=0x%02x write=%d"
 jensen_s3_io(unsigned port, uint64_t value, unsigned size, bool write) "port=0x%04x value=0x%" PRIx64 " size=%u write=%d"

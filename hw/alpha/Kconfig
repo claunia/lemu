@@ -41,3 +41,4 @@ config JENSEN
     select I8257
     select FDC_ISA
     select SCSI
+    select PCNET_COMMON
