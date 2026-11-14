@@ -64,5 +64,8 @@ OpenVMS AXP V1.5-1H1 boots from the SRM console (`b dka0`). It needs:
   `quirk_mode_page_set_block_size=on`, `quirk_mode_sense_rom_use_dbd=on`,
   `quirk_mode_page_rw_error_vms=on`, `quirk_mode_sense_rom_wp=on`,
   `scsi_version=2`, `vendor=DEC`, `product='RRD42   (C) DEC'`, `ver=4.5d`.
-- VMS asks for the date and time at every start.
+- The SRM console moves the RTC's year from the ARC count (from 1980) to the
+  VMS one (from 1900) at power-on. The jensen machine starts the RTC in
+  binary mode, as the firmware leaves it. In BCD the console read 1998 as
+  2004, wrote year 4, and VMS asked for the date and time at every start.
 - VMS has no driver for the emulated network cards.

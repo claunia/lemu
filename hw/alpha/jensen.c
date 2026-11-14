@@ -31,6 +31,7 @@
 #include "hw/core/qdev-clock.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/rtc/mc146818rtc.h"
+#include "hw/rtc/mc146818rtc_regs.h"
 #include "hw/timer/i8254.h"
 #include "hw/timer/i8254_internal.h"
 #include "system/blockdev.h"
@@ -872,6 +873,14 @@ static void jensen_init(MachineState *machine)
     qdev_connect_gpio_out(DEVICE(rtc), 0,
                           qemu_allocate_irq(jensen_rtc_irq, s, 0));
     s->rtc = MC146818_RTC(rtc);
+    /*
+     * The battery keeps register B, and the firmware leaves the clock in
+     * binary mode. At power-on the SRM console reads the year before it sets
+     * that mode, to move it from the ARC count (from 1980) to the VMS one
+     * (from 1900). It read QEMU's BCD default as binary, made 1998 into 2004,
+     * and VMS asked for the date at every start.
+     */
+    s->rtc->cmos_data[RTC_REG_B] |= REG_B_DM;
     address_space_init(&s->rtc_as, &s->rtc->io, "jensen-rtc-device");
     memory_region_init_io(&s->rtc_window, OBJECT(s), &jensen_rtc_ops, s,
                           "jensen-vl82c106-rtc", 2);
