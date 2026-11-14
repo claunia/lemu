@@ -1279,7 +1279,12 @@ static int mode_sense_page(SCSIDiskState *s, int page, uint8_t **p_outbuf,
             }
             break;
         }
-        p[0] = 0x80; /* Automatic Write Reallocation Enabled */
+        if (s->quirks & (1 << SCSI_DISK_QUIRK_MODE_PAGE_RW_ERROR_VMS)) {
+            /* OpenVMS wants TB and PER, and no automatic reallocation. */
+            p[0] = 0x24;
+        } else {
+            p[0] = 0x80; /* Automatic Write Reallocation Enabled */
+        }
         if (s->qdev.type == TYPE_ROM) {
             p[1] = 0x20; /* Read Retry Count */
         }
@@ -1405,6 +1410,10 @@ static int scsi_disk_emulate_mode_sense(SCSIDiskReq *r, uint8_t *outbuf)
              */
             dev_specific_param = 0x00;
             dbd = true;
+        }
+        /* OpenVMS takes a CD-ROM for read-only only when WP is set. */
+        if (s->quirks & (1 << SCSI_DISK_QUIRK_MODE_SENSE_ROM_WP)) {
+            dev_specific_param |= 0x80;
         }
     }
 
@@ -3341,6 +3350,8 @@ static const Property scsi_hd_properties[] = {
                     SCSI_DISK_QUIRK_MODE_SELECT_IGNORE, 0),
     DEFINE_PROP_BIT("quirk_mode_page_format_device", SCSIDiskState, quirks,
                     SCSI_DISK_QUIRK_MODE_PAGE_FORMAT_DEVICE, 0),
+    DEFINE_PROP_BIT("quirk_mode_page_rw_error_vms", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_PAGE_RW_ERROR_VMS, 0),
     DEFINE_BLOCK_CHS_PROPERTIES(SCSIDiskState, qdev.conf),
 };
 
@@ -3450,6 +3461,10 @@ static const Property scsi_cd_properties[] = {
                     quirks, SCSI_DISK_QUIRK_MODE_PAGE_SET_BLOCK_SIZE, 0),
     DEFINE_PROP_BIT("quirk_mode_select_ignore", SCSIDiskState, quirks,
                     SCSI_DISK_QUIRK_MODE_SELECT_IGNORE, 0),
+    DEFINE_PROP_BIT("quirk_mode_page_rw_error_vms", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_PAGE_RW_ERROR_VMS, 0),
+    DEFINE_PROP_BIT("quirk_mode_sense_rom_wp", SCSIDiskState, quirks,
+                    SCSI_DISK_QUIRK_MODE_SENSE_ROM_WP, 0),
 };
 
 static void scsi_cd_class_initfn(ObjectClass *klass, const void *data)
