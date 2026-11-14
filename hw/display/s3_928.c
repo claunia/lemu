@@ -406,6 +406,15 @@ static void s3_resolution(VGACommonState *vga, int *width, int *height)
     if (s3_packed(s)) {
         *width += (vga->cr[0x5d] & 2) << 10;
         *height += (vga->cr[0x5e] & 2) << 9;
+        /*
+         * CR42[5]: interlaced. The vertical registers then count the
+         * lines of one field, and the two fields show alternate lines of
+         * the frame. The X server of AIX PS/2 1.3 uses 1024x768
+         * interlaced by default.
+         */
+        if (vga->cr[0x42] & 0x20) {
+            *height *= 2;
+        }
         if (vga->cr[0x43] & 0x80) {
             *width *= 2;
         }
@@ -1312,8 +1321,12 @@ static void s3_reset(DeviceState *dev)
     s->transfer_data = s->transfer_bytes = 0;
     s->pending = s->unsupported = false;
     s->vga.cr[0x30] = 0x91; /* 86C928D */
-    /* CR36[7:5]: 100 = 2 MiB, 000 = 4 MiB (S3 DB02-C, table 12-1). */
-    s->vga.cr[0x36] = (s->vga.vram_size_mb == 2 ? 0x80 : 0) | 0x0f;
+    /*
+     * CR36[7:5]: 110 = 1 MiB, 100 = 2 MiB, 000 = 4 MiB (S3 DB02-C,
+     * table 12-1). The S3 driver of AIX PS/2 1.3 wants 110.
+     */
+    s->vga.cr[0x36] = (s->vga.vram_size_mb == 1 ? 0xc0 :
+                       s->vga.vram_size_mb == 2 ? 0x80 : 0) | 0x0f;
     s->vga.cr[0x37] = 0x02;
     s->reg[WRITE_MASK] = s->reg[READ_MASK] = 0xff;
     s->multi[3] = s->multi[4] = 0xfff;
@@ -1325,8 +1338,9 @@ static void s3_realize(DeviceState *dev, Error **errp)
     ISADevice *isa = ISA_DEVICE(dev);
     VGACommonState *vga = &s->vga;
     unsigned i;
-    if (vga->vram_size_mb != 2 && vga->vram_size_mb != 4) {
-        error_setg(errp, "S3 928 VRAM must be 2 or 4 MiB");
+    if (vga->vram_size_mb != 1 && vga->vram_size_mb != 2 &&
+        vga->vram_size_mb != 4) {
+        error_setg(errp, "S3 928 VRAM must be 1, 2 or 4 MiB");
         return;
     }
     if (!vga_common_init(vga, OBJECT(dev), errp)) {
