@@ -2,17 +2,24 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Pack a PC kit: the disk and firmware from VMDIR, run.sh, run.cmd and
 # README.txt from ../GUEST, the binaries from BINDIR
-# usage: pack.sh nt351 VMDIR BINDIR OUT.tar.lz
-#   VMDIR   holds disk/GUEST.qcow2, fw/bios-GUEST.bin and fw/928-n9.bin;
-#           it is only read
+# usage: pack.sh nt351|aix13 VMDIR BINDIR OUT.tar.lz
+#   VMDIR   holds disk/GUEST.qcow2, for nt351 also fw/bios-nt351.bin and
+#           fw/928-n9.bin; it is only read
 #   BINDIR  STAGE/i386 of ../../release/stage.sh
+# nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3).
 set -e
-[ $# -eq 4 ] || { echo "usage: $0 nt351 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
+[ $# -eq 4 ] || { echo "usage: $0 nt351|aix13 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../../.." && pwd)
 g=$1 vm=$2 bin=$3
+# fw: files from VMDIR/fw; roms: files from pc-bios that QEMU looks up by name
+case $g in
+nt351) k=nt351x86-lemu fw="bios-nt351.bin 928-n9.bin" roms= ;;
+aix13) k=aix13ps2-lemu fw= roms="bios-256k.bin vgabios-stdvga.bin" ;;
+*) echo "$0: no guest $g" >&2; exit 1 ;;
+esac
 [ -f "$here/../$g/run.sh" ] || { echo "$0: no guest $g in $here/.." >&2; exit 1; }
-for f in disk/$g.qcow2 fw/bios-$g.bin fw/928-n9.bin; do
+for f in disk/$g.qcow2 $(for x in $fw; do echo fw/$x; done); do
     [ -f "$vm/$f" ] || { echo "$0: no $vm/$f" >&2; exit 1; }
 done
 plats="macos-arm64 linux-x86_64 linux-aarch64 windows-x86_64"
@@ -20,14 +27,17 @@ for p in $plats; do
     [ -d "$bin/$p" ] || { echo "$0: no $bin/$p" >&2; exit 1; }
 done
 out=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
-k=${g}x86-lemu
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$k
-mkdir -p "$r/bin/share/qemu/keymaps" "$r/fw"
+mkdir -p "$r/bin/share/qemu/keymaps"
 
 qemu-img convert -O qcow2 "$vm/disk/$g.qcow2" "$r/$g.qcow2"
-cp "$vm/fw/bios-$g.bin" "$vm/fw/928-n9.bin" "$r/fw/"
+if [ -n "$fw" ]; then
+    mkdir -p "$r/fw"
+    for x in $fw; do cp "$vm/fw/$x" "$r/fw/"; done
+    chmod 644 "$r"/fw/*
+fi
 cp "$here/../$g/run.sh" "$here/../$g/README.txt" "$r/"
 sed 's/$/\r/' "$here/../$g/run.cmd" > "$r/run.cmd"
 cp "$top/COPYING" "$top/COPYING.LIB" "$r/bin/"
@@ -36,10 +46,12 @@ find "$top/pc-bios/keymaps" -type f ! -name meson.build \
 for p in $plats; do
     cp -a "$bin/$p" "$r/bin/"
 done
-# the PC loads this option ROM for the CPU's local APIC
-cp "$top/pc-bios/kvmvapic.bin" "$r/bin/share/qemu/"
-cp "$top/pc-bios/kvmvapic.bin" "$r/bin/windows-x86_64/share/"
-chmod 644 "$r/$g.qcow2" "$r"/fw/*
+# the PC loads kvmvapic.bin, the option ROM for the CPU's local APIC
+for x in kvmvapic.bin $roms; do
+    cp "$top/pc-bios/$x" "$r/bin/share/qemu/"
+    cp "$top/pc-bios/$x" "$r/bin/windows-x86_64/share/"
+done
+chmod 644 "$r/$g.qcow2"
 
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 \
     --uname root --gname root -C "$t" -cf - $k | plzip -9 > "$out.tmp"
