@@ -3,8 +3,8 @@
 # Pack a PC kit: the disk and firmware from VMDIR, run.sh, run.cmd and
 # README.txt from ../GUEST, the binaries from BINDIR
 # usage: pack.sh nt351|aix13 VMDIR BINDIR OUT.tar.lz
-#   VMDIR   holds disk/GUEST.qcow2, for nt351 also fw/bios-nt351.bin and
-#           fw/928-n9.bin; it is only read
+#   VMDIR   holds disk/GUEST.qcow2 and fw/928-n9.bin, for nt351 also
+#           fw/bios-nt351.bin; it is only read
 #   BINDIR  STAGE/i386 of ../../release/stage.sh
 # nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3).
 set -e
@@ -15,7 +15,7 @@ g=$1 vm=$2 bin=$3
 # fw: files from VMDIR/fw; roms: files from pc-bios that QEMU looks up by name
 case $g in
 nt351) k=nt351x86-lemu fw="bios-nt351.bin 928-n9.bin" roms= ;;
-aix13) k=aix13ps2-lemu fw= roms="bios-256k.bin vgabios-stdvga.bin" ;;
+aix13) k=aix13ps2-lemu fw=928-n9.bin roms=bios-256k.bin ;;
 *) echo "$0: no guest $g" >&2; exit 1 ;;
 esac
 [ -f "$here/../$g/run.sh" ] || { echo "$0: no guest $g in $here/.." >&2; exit 1; }

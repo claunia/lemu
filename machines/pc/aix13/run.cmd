@@ -9,7 +9,7 @@ bin\windows-x86_64\qemu-system-i386.exe ^
  -global isa-fdc.cmd-drops-irq=on -global isa-fdc.seek-latency-us=1000 ^
  -global isa-fdc.fallback=144 ^
  -rtc base=%base% ^
- -vga std ^
+ -vga none -device s3-928,vram-size-mb=1,romfile=fw/928-n9.bin ^
  -drive file=aix13.qcow2,if=none,id=hd0,format=qcow2 ^
  -device ide-hd,drive=hd0,bus=ide.0,unit=0,cyls=1024,heads=16,secs=63,bios-chs-trans=none ^
  -drive if=floppy,index=0,id=fd0 ^

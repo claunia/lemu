@@ -1,9 +1,10 @@
-IBM AIX PS/2 1.3 (PTF 0024) for x86 on QEMU's PC (486, 16 MB, i440FX, VGA)
+IBM AIX PS/2 1.3 (PTF 0024) for x86 on QEMU's PC (486, 16 MB, i440FX, S3 86C928 with 1 MB)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 Log in as root (no password) at "Console login:" on the screen, or with telnet localhost 1323.
 rsh to localhost port 13514 runs commands as root (no .rhosts needed).
 X11: type xinit for X with twm, or xinit -mwm for the Motif window manager. In the AIX Shell window, xdt & starts the AIXwindows Desktop. Ctrl-Alt-Backspace leaves X.
+X runs 1024x768 with 256 colours on the S3 card. That is the biggest mode IBM's X server has, and its S3 driver takes the card only with exactly 1 MB of video memory (vram-size-mb=1 in run.sh).
 Installed: the Base Operating System and 28 program products, among them TCP/IP, NFS, X Windows, AIXwindows (Motif) and its Desktop, Xstation Manager, the MetaWare High C compiler (cc), Advanced Development Tools, SCCS, INed, Message Handler, Text Formatting System, games and the man pages. All are updated to PTF 0024 (1995).
 /u is empty, with 110 MB free for your files.
 Network: an AMD PCnet-PCI II card with the leaix driver (github.com/rakslice/leaix, an AMD PCnet driver for AIX PS/2 ported from NetBSD; its source is in /u/src/leaix). QEMU user mode NAT; AIX is 10.0.2.15 with gateway 10.0.2.2 and DNS 10.0.2.3.
