@@ -3518,6 +3518,20 @@ static bool trans_hw_mtpr(DisasContext *s, arg_hw_mtpr *a)
         if (unlikely(a->ra != a->rb)) {
             return false;
         }
+        /*
+         * The 21064 HW_MTPR may select a PAL temporary (bit 7), an Abox
+         * IPR (bit 6) and an Ibox IPR (bit 5) at once: the value goes to
+         * each one. The VMS PALcode writes PS and PT9 together, both TB
+         * zaps for TBIA, and ALT_MODE with PT15 for PROBER and PROBEW.
+         */
+        if (ctpop32(a->iprn & 0xe0) > 1 && !(a->iprn & ~0xffu)) {
+            for (unsigned sel = 0x80; sel >= 0x20; sel >>= 1) {
+                if (a->iprn & sel) {
+                    gen_ipreg_insn(s, a->rb, sel | (a->iprn & 0x1f), false);
+                }
+            }
+            return true;
+        }
         break;
     default:
         if (unlikely(a->ra != 31)) {
