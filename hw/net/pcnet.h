@@ -55,6 +55,8 @@ struct PCNetState_st {
     int looptest;
     /* decode only A31:2, as the chip does, so narrow reads see the DWord */
     bool dword_decode;
+    /* STOP clears TXON, as on the chip; the DE422 self-test checks it */
+    bool stop_clears_txon;
 };
 
 void pcnet_h_reset(void *opaque);
