@@ -1209,17 +1209,23 @@ static void ev4_ps_write(CPUAlphaState *env, const AlphaIPRegInfo *ri,
     alpha_rebuild_hflags(env);
 }
 
+/*
+ * HIRR, SIRR and ASTRR all read as this register. HWR, SWR and ATR sum up
+ * the enabled requests, but the SIR and AST fields show every request, as
+ * PALcode reads them back to update SIRR and ASTRR: VMS's MTPR_SIRR,
+ * MTPR_ASTSR and AST dispatch would otherwise drop the masked requests.
+ */
 static uint64_t ev4_irr_read(CPUAlphaState *env, const AlphaIPRegInfo *ri)
 {
     uint64_t ret = 0;
     uint32_t eir = alpha_get_eir(env) & alpha_get_eien(env);
-    uint32_t sir = alpha_get_sir(env) & alpha_get_sien(env);
-    int ast = alpha_pending_ast(env);
+    uint32_t sir = alpha_get_sir(env);
+    int ast = alpha_get_astrr(env);
     bool pc0 = env->irq_line_state & BIT(ALPHA_CPU_INPUT_PC0);
     bool pc1 = env->irq_line_state & BIT(ALPHA_CPU_INPUT_PC1);
 
     SET_FIELD(ret, EV4_HIRR, HWR, (eir != 0));
-    SET_FIELD(ret, EV4_HIRR, SWR, (sir != 0));
+    SET_FIELD(ret, EV4_HIRR, SWR, alpha_cpu_sirq_pending(env));
     SET_FIELD(ret, EV4_HIRR, ATR, alpha_cpu_astirq_pending(env));
     SET_FIELD(ret, EV4_HIRR, CRR, alpha_get_crr(env) & alpha_get_cren(env));
     SET_FIELD(ret, EV4_HIRR, IRQ3, extract64(eir, 3, 1));
@@ -1366,7 +1372,7 @@ static const AlphaIPRegInfo ev4_ibox_ip_reginfo[] = {
       .readfn = ev4_irr_read, .raw_readfn = raw_read },
     { .name = "ASTRR", .ipr = EV4_IPR_ASTRR,
       .access = IPR_RW,
-      .fieldoffset = offsetof(CPUAlphaState, ipr.aster),
+      .fieldoffset = offsetof(CPUAlphaState, ipr.astrr),
       .writefn = ev4_astrr_write, .raw_writefn = raw_write,
       .readfn = ev4_irr_read, .raw_readfn = raw_read },
     { .name = "HIER", .ipr = EV4_IPR_HIER,
