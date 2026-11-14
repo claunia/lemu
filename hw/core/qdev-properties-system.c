@@ -599,9 +599,10 @@ static void qdev_propinfo_set_losttickpolicy(Object *obj, Visitor *v,
     if (value == LOST_TICK_POLICY_SLEW) {
         MachineState *ms = MACHINE(qdev_get_machine());
 
-        if (!object_dynamic_cast(OBJECT(ms), TYPE_X86_MACHINE)) {
+        if (!object_dynamic_cast(OBJECT(ms), TYPE_X86_MACHINE) &&
+            !MACHINE_GET_CLASS(ms)->lost_tick_slew) {
             error_setg(errp,
-                       "the 'slew' policy is only available for x86 machines");
+                       "the 'slew' policy is not available for this machine");
             return;
         }
     }
