@@ -74,7 +74,7 @@ test_vnc_basic_on_vnc_initialized(VncConnection *self,
 {
     const char *name = vnc_connection_get_name(test->conn);
 
-    g_assert_cmpstr(name, ==, "QEMU (vnc-test)");
+    g_assert_cmpstr(name, ==, "LEMU (vnc-test)");
     g_main_loop_quit(test->loop);
 }
 

@@ -68,7 +68,7 @@ on_vnc_initialized(VncConnection *self, GMainLoop *loop)
 {
     const char *name = vnc_connection_get_name(self);
 
-    g_assert_cmpstr(name, ==, "QEMU (dbus-vnc-test)");
+    g_assert_cmpstr(name, ==, "LEMU (dbus-vnc-test)");
     g_main_loop_quit(loop);
 }
 
