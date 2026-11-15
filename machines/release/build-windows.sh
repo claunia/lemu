@@ -28,7 +28,7 @@ cd /b/build
     --cross-prefix=x86_64-w64-mingw32- \
     --target-list=i386-softmmu,ppc-softmmu,ppc64-softmmu,alpha-softmmu,mips64el-softmmu,mips64-softmmu,hppa-softmmu,sparc-softmmu,m68k-softmmu \
     --without-default-features --enable-system --enable-tcg --enable-hmp --enable-sdl \
-    --enable-dsound --enable-pixman --enable-slirp --enable-fdt=internal --enable-vnc \
+    --enable-dsound --enable-pixman --enable-slirp --enable-fdt=internal --enable-vnc --enable-rdp \
     --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk --enable-vpc --enable-vhdx \
     --enable-qed --enable-bochs --enable-cloop --enable-dmg --enable-parallels \
     --enable-stack-protector --disable-docs > /out/windows-x86_64-configure.log
@@ -65,7 +65,7 @@ while [ -n "$todo" ]; do
 done
 set +x
 fail=0
-for f in 'SDL support' 'DirectSound support' 'slirp support'; do
+for f in 'SDL support' 'DirectSound support' 'slirp support' 'RDP support'; do
     grep -q "^ *$f *: YES" /out/windows-x86_64-configure.log ||
         { echo "MISSING: $f"; fail=1; }
 done

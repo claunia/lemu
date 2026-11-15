@@ -32,7 +32,7 @@ cd /b/build
     --target-list=i386-softmmu,ppc-softmmu,ppc64-softmmu,alpha-softmmu,mips64el-softmmu,mips64-softmmu,hppa-softmmu,sparc-softmmu,m68k-softmmu \
     --without-default-features --enable-system --enable-tcg --enable-hmp --enable-sdl \
     --enable-pixman --enable-slirp --enable-pa --enable-alsa --enable-malloc-trim --enable-membarrier \
-    --enable-fdt=internal --enable-vnc --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk \
+    --enable-fdt=internal --enable-vnc --enable-rdp --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk \
     --enable-vpc --enable-vhdx --enable-qed --enable-bochs --enable-cloop --enable-dmg --enable-parallels \
     --enable-stack-protector --disable-docs > $out-configure.log
 ninja $BINS > $out-ninja.log

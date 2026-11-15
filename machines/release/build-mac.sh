@@ -18,7 +18,7 @@ mkdir -p $B && cd $B
 $SRC/configure --target-list=i386-softmmu,ppc-softmmu,ppc64-softmmu,alpha-softmmu,mips64el-softmmu,mips64-softmmu,hppa-softmmu,sparc-softmmu,m68k-softmmu \
   --without-default-features --enable-system --enable-tcg --enable-hmp \
   --enable-sdl --enable-cocoa --enable-coreaudio --enable-vmnet --enable-slirp --enable-pixman \
-  --enable-fdt=internal --enable-vnc --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk \
+  --enable-fdt=internal --enable-vnc --enable-rdp --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk \
   --enable-vpc --enable-vhdx --enable-qed --enable-bochs --enable-cloop --enable-dmg --enable-parallels \
   --disable-docs --disable-werror --disable-capstone > configure.log
 ninja $BINS > ninja.log

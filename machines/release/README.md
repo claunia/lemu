@@ -36,7 +36,8 @@ commit.
   `OUT/linux-x86_64`, `OUT/linux-aarch64` and `OUT/windows-x86_64`.
 - `OUT/rc` must show exit code 0 for all four. The logs are in
   `OUT/*.log`.
-- Each binary has every feature that any of the five machine builds had.
+- Each binary has every feature that any of the five machine builds had,
+  and the RDP server (`-rdp`, see `ui/rdp/README.md`).
   qemu-system-hppa, qemu-system-i386, qemu-system-sparc and
   qemu-system-m68k get the same set.
 - `build-mac.sh` prints the oldest macOS the binaries run on
