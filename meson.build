@@ -1971,6 +1971,15 @@ if get_option('vnc') \
   endif
 endif
 
+rdp = not_found
+if get_option('rdp') \
+             .disable_auto_if(not have_system) \
+             .require(pixman.found(),
+                      error_message: 'cannot enable RDP if pixman is not available') \
+             .allowed()
+  rdp = declare_dependency() # dummy dependency
+endif
+
 pam = not_found
 if not get_option('auth_pam').auto() or have_system
   pam = cc.find_library('pam', has_headers: ['security/pam_appl.h'],
@@ -2521,6 +2530,7 @@ config_host_data.set('CONFIG_VHOST_USER_BLK_SERVER', have_vhost_user_blk_server)
 config_host_data.set('CONFIG_VDUSE_BLK_EXPORT', have_vduse_blk_export)
 config_host_data.set('CONFIG_PNG', png.found())
 config_host_data.set('CONFIG_VNC', vnc.found())
+config_host_data.set('CONFIG_RDP', rdp.found())
 config_host_data.set('CONFIG_VNC_JPEG', jpeg.found())
 config_host_data.set('CONFIG_VNC_SASL', sasl.found())
 if virgl.found()
@@ -4994,6 +5004,7 @@ if vnc.found()
   summary_info += {'VNC JPEG support':  jpeg}
 endif
 summary_info += {'VNC D-Bus server (qemu-vnc)': have_qemu_vnc}
+summary_info += {'RDP support':       rdp}
 summary_info += {'spice protocol support': spice_protocol}
 if spice_protocol.found()
   summary_info += {'  spice server support': spice}

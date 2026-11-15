@@ -26,6 +26,10 @@ It emulates **old computers**, and it is made to be used **with AI agents**.
   is a mouse driver for NT 3.1 to 4.0 on the PC, the Magnum, the RM200,
   the Jensen and the 40P. The window stops grabbing the mouse, and
   NT 4.0 gets a scroll wheel.
+- **RDP server.** Next to VNC, `-rdp localhost:3389` lets Remote Desktop
+  clients see and use the guest. TLS and a password are optional. The
+  protocol code comes from [ntrdps](https://github.com/tenox7/ntrdps);
+  see [ui/rdp](ui/rdp/README.md).
 
 ## Machines
 

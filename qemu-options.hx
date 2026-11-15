@@ -2813,6 +2813,50 @@ SRST
         control requests.
 ERST
 
+#ifdef CONFIG_RDP
+DEF("rdp", HAS_ARG, QEMU_OPTION_rdp,
+    "-rdp [host:]port[,tls=on|off][,tls-key=file][,password-secret=id]\n"
+    "                [,plain-login=on|off][,display=id[,head=n]]\n"
+    "                RDP server on the given TCP port\n", QEMU_ARCH_ALL)
+#endif
+SRST
+``-rdp [host:]port[,option[,option[,...]]]``
+    Serve the guest's screen, keyboard and mouse to RDP clients on the
+    given TCP port, for example ``-rdp localhost:3389``. Like ``-vnc``, it
+    replaces the local window unless ``-display`` asks for one too. One
+    client has the screen at a time; a new client takes it over once it
+    has logged on. The keyboard is sent as scancodes, so the guest's own
+    layout applies. ``ui/rdp/README.md`` lists the clients it is tested
+    with.
+
+    The server comes from ntrdps (see ``ui/rdp/README.md``). Its log goes
+    to the trace events ``rdp_*`` (``-trace 'rdp_*'``).
+
+    ``tls=on|off``
+        Offer TLS 1.2 to clients that ask for it (default on). Clients
+        that ask for nothing get plain RDP either way. The certificate is
+        self-signed: clients ask once whether to trust it.
+
+    ``tls-key=file``
+        The TLS private key (P-256, PEM or DER). A file that does not
+        exist yet gets a new key, so the certificate stays the same from
+        run to run. Without it, each run makes a new key.
+
+    ``password-secret=id``
+        Ask for the password of the ``secret`` object id before a client
+        gets the screen. Clients that send a saved password log on with
+        it; the others get a box that asks for it. Without this option
+        anyone who reaches the port gets the screen.
+
+    ``plain-login=on|off``
+        With ``off``, only TLS clients may log on, so the password never
+        crosses the network in clear (default on). Needs
+        ``password-secret`` and ``tls=on``.
+
+    ``display=id[,head=n]``
+        The graphics device to serve (default: the first console).
+ERST
+
 ARCHHEADING(, QEMU_ARCH_I386)
 
 ARCHHEADING(i386 target only:, QEMU_ARCH_I386)

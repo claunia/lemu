@@ -221,3 +221,9 @@ pointer_move(int con, int x, int y, const char *method, bool homed, int steps, b
 pointer_calibrate(int con, int step, int gain_x_milli, int gain_y_milli, const char *error) "con %d step %d gain %d,%d/1000 error '%s'"
 pointer_cursor(int con, int sx, int sy, int x, int y, bool visible, uint32_t shape) "con %d step %d,%d: cursor image at %d,%d visible %d shape 0x%08x"
 pointer_hotspot(int con, uint32_t shape, int x, int y, const char *how) "con %d cursor image 0x%08x: hotspot %d,%d (%s)"
+
+# rdp.c
+rdp_listen(const char *addr, bool tls, bool password, const char *fingerprint) "RDP server on %s tls %d password %d certificate sha256 %s"
+rdp_log(int level, const char *msg) "%d %s"
+rdp_hex(const char *direction, unsigned int len) "%s %u bytes"
+rdp_hex_line(const char *line) "%s"

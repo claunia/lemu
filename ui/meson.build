@@ -95,6 +95,92 @@ vnc_ss.add(when: sasl, if_true: files('vnc-auth-sasl.c'))
 system_ss.add_all(when: [vnc, pixman], if_true: vnc_ss)
 system_ss.add(when: vnc, if_true: files('vnc-system.c'), if_false: files('vnc-stubs.c'))
 
+# The RDP server: ntrdps's protocol code (ui/rdp, see its README.md) and
+# the BearSSL that its TLS uses, each built with its own include paths.
+if rdp.found()
+  libbearssl = static_library('bearssl', files(
+      'rdp/bearssl/src/aes_ct_ctr.c',
+      'rdp/bearssl/src/aes_ct_enc.c',
+      'rdp/bearssl/src/aes_ct.c',
+      'rdp/bearssl/src/ccopy.c',
+      'rdp/bearssl/src/dec32be.c',
+      'rdp/bearssl/src/ec_p256_m15.c',
+      'rdp/bearssl/src/ec_prime_i15.c',
+      'rdp/bearssl/src/ec_secp256r1.c',
+      'rdp/bearssl/src/ec_secp384r1.c',
+      'rdp/bearssl/src/ec_secp521r1.c',
+      'rdp/bearssl/src/ecdsa_atr.c',
+      'rdp/bearssl/src/ecdsa_i15_bits.c',
+      'rdp/bearssl/src/ecdsa_i15_sign_asn1.c',
+      'rdp/bearssl/src/ecdsa_i15_sign_raw.c',
+      'rdp/bearssl/src/ecdsa_i15_vrfy_asn1.c',
+      'rdp/bearssl/src/ecdsa_i15_vrfy_raw.c',
+      'rdp/bearssl/src/ecdsa_rta.c',
+      'rdp/bearssl/src/enc32be.c',
+      'rdp/bearssl/src/ghash_ctmul32.c',
+      'rdp/bearssl/src/hmac_drbg.c',
+      'rdp/bearssl/src/hmac.c',
+      'rdp/bearssl/src/i15_add.c',
+      'rdp/bearssl/src/i15_bitlen.c',
+      'rdp/bearssl/src/i15_decmod.c',
+      'rdp/bearssl/src/i15_decode.c',
+      'rdp/bearssl/src/i15_encode.c',
+      'rdp/bearssl/src/i15_fmont.c',
+      'rdp/bearssl/src/i15_iszero.c',
+      'rdp/bearssl/src/i15_modpow.c',
+      'rdp/bearssl/src/i15_modpow2.c',
+      'rdp/bearssl/src/i15_montmul.c',
+      'rdp/bearssl/src/i15_muladd.c',
+      'rdp/bearssl/src/i15_ninv15.c',
+      'rdp/bearssl/src/i15_rshift.c',
+      'rdp/bearssl/src/i15_sub.c',
+      'rdp/bearssl/src/i15_tmont.c',
+      'rdp/bearssl/src/multihash.c',
+      'rdp/bearssl/src/prf_sha256.c',
+      'rdp/bearssl/src/prf.c',
+      'rdp/bearssl/src/rsa_i15_pkcs1_vrfy.c',
+      'rdp/bearssl/src/rsa_i15_pub.c',
+      'rdp/bearssl/src/rsa_pkcs1_sig_unpad.c',
+      'rdp/bearssl/src/sha2small.c',
+      'rdp/bearssl/src/ssl_client.c',
+      'rdp/bearssl/src/ssl_engine.c',
+      'rdp/bearssl/src/ssl_hashes.c',
+      'rdp/bearssl/src/ssl_hs_client.c',
+      'rdp/bearssl/src/ssl_hs_server.c',
+      'rdp/bearssl/src/ssl_rec_gcm.c',
+      'rdp/bearssl/src/ssl_scert_single_ec.c',
+      'rdp/bearssl/src/ssl_server.c',
+      'rdp/bearssl/src/sysrng.c',
+      'rdp/bearssl/src/x509_decoder.c',
+    ),
+    include_directories: include_directories('rdp/bearssl/inc',
+                                              'rdp/bearssl/src'),
+    # Upstream code: two warnings of QEMU's set are off for it. Its random
+    # bytes come from QEMU (rdp-tls.c), never from its own code.
+    c_args: cc.get_supported_arguments('-Wno-undef', '-Wno-redundant-decls') +
+            ['-DBR_USE_GETENTROPY=0', '-DBR_USE_URANDOM=0',
+             '-DBR_USE_WIN32_RAND=0', '-DBR_RDRAND=0'],
+    build_by_default: false)
+  rdp_inc = [include_directories('rdp/bearssl/inc')]
+  if host_os != 'windows'
+    rdp_inc += include_directories('rdp/posix')   # its <windows.h>
+  endif
+  librdp = static_library('rdp', files(
+      'rdp.c', 'rdp-login.c', 'rdp-tls.c',
+      'rdp/bitmaps.c', 'rdp/caps.c', 'rdp/draw.c', 'rdp/frame.c',
+      'rdp/gcc.c', 'rdp/glyphs.c', 'rdp/inputpdu.c', 'rdp/lfont.c',
+      'rdp/lic.c', 'rdp/mcs.c', 'rdp/mppc.c', 'rdp/orders.c',
+      'rdp/pointer.c', 'rdp/rdp.c', 'rdp/reduce.c', 'rdp/rle.c',
+      'rdp/sec.c', 'rdp/share.c', 'rdp/stream.c', 'rdp/update.c',
+      'rdp/x224.c') + genh,
+    include_directories: rdp_inc,
+    dependencies: [pixman],
+    build_by_default: false)
+  system_ss.add(declare_dependency(objects: [
+    librdp.extract_all_objects(recursive: false),
+    libbearssl.extract_all_objects(recursive: false)]))
+endif
+
 ui_modules = {}
 
 if curses.found()

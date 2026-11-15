@@ -260,6 +260,8 @@ option('png', type : 'feature', value : 'auto',
        description: 'PNG support with libpng')
 option('vnc', type : 'feature', value : 'auto',
        description: 'VNC server')
+option('rdp', type : 'feature', value : 'auto',
+       description: 'RDP server')
 option('vnc_jpeg', type : 'feature', value : 'auto',
        description: 'JPEG lossy compression for VNC server')
 option('vnc_sasl', type : 'feature', value : 'auto',
