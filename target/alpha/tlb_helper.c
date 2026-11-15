@@ -179,14 +179,49 @@ static inline CPUAlphaTLBContext *get_tlb_context(CPUAlphaState *env,
 }
 
 /**
+ * Return the number of entries a TLB has.
+ *
+ * The 21064 (EV4) DTB has 32 entries (21064A data sheet, 4.2.2). OpenVMS
+ * AXP V1.5 depends on that: when image rundown deletes an empty P0 page
+ * table page, VMS invalidates the page's S0 alias but not its alias in
+ * the PALcode's virtual page table (VPTB). On the chip that stale entry
+ * is replaced long before the next P0 miss; a larger TLB keeps it, and
+ * the next image then reads its PTEs from a freed page.
+ */
+static inline uint32_t tlb_size(CPUAlphaState *env, AlphaTLBType type)
+{
+    if (env->implver == IMPLVER_2106x && type == AlphaTLBType_Data) {
+        return 32;
+    }
+    return MAX_TLB_ENTRIES;
+}
+
+/**
  * Return the next TLB entry to use.
  */
-static inline uint32_t get_next_tlbe(CPUAlphaTLBContext *ctx)
+static inline uint32_t get_next_tlbe(CPUAlphaState *env, AlphaTLBType type,
+                                     CPUAlphaTLBContext *ctx)
 {
-    uint32_t val = ctx->last_way;
+    uint32_t size = tlb_size(env, type);
+    uint32_t val = ctx->last_way < size ? ctx->last_way : 0;
 
-    ctx->last_way = (ctx->last_way + 1) % MAX_TLB_ENTRIES;
+    ctx->last_way = (val + 1) % size;
     return val;
+}
+
+/**
+ * Forget QEMU's copy of a TLB entry that is about to be replaced.
+ *
+ * The hardware loses the old translation when it reuses an entry. QEMU's
+ * TLB must lose it too, or the guest keeps the old mapping without ever
+ * taking the miss that would reload it.
+ */
+static void drop_tlb_entry(CPUAlphaState *env, CPUAlphaTLBEntry *entry)
+{
+    vaddr va = sextract64(entry->vaddr, 0, alpha_vamax(env->implver));
+
+    tlb_flush_range_by_mmuidx(env_cpu(env), va, entry->keep_mask + 1,
+                              all_tlbmask(), TARGET_LONG_BITS);
 }
 
 /**
@@ -690,7 +725,10 @@ void alpha_tlb_fill(CPUAlphaState *env, AlphaTLBType type, vaddr address,
      */
     entry = find_tlb_entry_asn(env, type, address, asn);
     if (entry == NULL) {
-        entry = &ctx->entries[get_next_tlbe(ctx)];
+        entry = &ctx->entries[get_next_tlbe(env, type, ctx)];
+    }
+    if (entry->flags & R_PTE_VALID_MASK) {
+        drop_tlb_entry(env, entry);
     }
 
     entry->vaddr = address & match_mask;
