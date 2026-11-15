@@ -776,9 +776,19 @@ static int update_in_progress(MC146818RtcState *s)
     }
     if (timer_pending(s->update_timer)) {
         int64_t next_update_time = timer_expire_time_ns(s->update_timer);
-        /* Latch UIP until the timer expires.  */
-        if (qemu_clock_get_ns(rtc_clock) >=
-            (next_update_time - UIP_HOLD_LENGTH)) {
+        int64_t now = qemu_clock_get_ns(rtc_clock);
+
+        if (now >= next_update_time) {
+            /*
+             * The update is due, but a busy host has not run the timer yet.
+             * On the chip UIP ends within 2 ms. Do the update now, or the
+             * guest sees UIP for as long as the timer is late: the DEC 2000
+             * (Jensen) firmware fails its NVR test when UIP stays 10 ms.
+             */
+            timer_del(s->update_timer);
+            rtc_update_timer(s);
+        } else if (now >= next_update_time - UIP_HOLD_LENGTH) {
+            /* Latch UIP until the timer expires.  */
             s->cmos_data[RTC_REG_A] |= REG_A_UIP;
             return 1;
         }
@@ -826,10 +836,9 @@ static uint64_t cmos_ioport_read(void *opaque, hwaddr addr,
             ret = s->cmos_data[s->cmos_index];
             break;
         case RTC_REG_A:
-            ret = s->cmos_data[s->cmos_index];
-            if (update_in_progress(s)) {
-                ret |= REG_A_UIP;
-            }
+            /* First, as update_in_progress() may end a latched UIP. */
+            ret = update_in_progress(s) ? REG_A_UIP : 0;
+            ret |= s->cmos_data[s->cmos_index];
             break;
         case RTC_REG_C:
             ret = s->cmos_data[s->cmos_index];
