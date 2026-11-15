@@ -834,6 +834,7 @@ static void sun4m_hw_init(MachineState *machine)
     DeviceState *dev, *ms_kb_orgate, *serial_orgate;
     DeviceState *cpus[MAX_CPUS];
     SysBusDevice *s;
+    void *iommu;
     unsigned int smp_cpus = machine->smp.cpus;
     unsigned int max_cpus = machine->smp.max_cpus;
     HostMemoryBackend *ram_memdev = machine->memdev;
@@ -887,7 +888,8 @@ static void sun4m_hw_init(MachineState *machine)
         afx_init(hwdef->afx_base);
     }
 
-    iommu_init(hwdef->iommu_base, hwdef->iommu_version, slavio_irq[30]);
+    iommu = iommu_init(hwdef->iommu_base, hwdef->iommu_version,
+                       slavio_irq[30]);
 
     if (hwdef->iommu_pad_base) {
         /* On the real hardware (SS-5, LX) the MMU is not padded, but aliased.
@@ -1048,8 +1050,21 @@ static void sun4m_hw_init(MachineState *machine)
                      slavio_irq[30], fdc_tc);
 
     if (hwdef->cs_base) {
-        sysbus_create_simple("sun-CS4231", hwdef->cs_base,
-                             slavio_irq[5]);
+        /* the APC DMA in front of the codec reads memory through the IOMMU */
+        dev = qdev_new("sun-CS4231");
+        if (machine->audiodev) {
+            qdev_prop_set_string(dev, "audiodev", machine->audiodev);
+        }
+        object_property_set_link(OBJECT(dev), "iommu", OBJECT(iommu),
+                                 &error_abort);
+        s = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(s, &error_fatal);
+        sysbus_mmio_map(s, 0, hwdef->cs_base);
+        /*
+         * OpenBIOS gives the node "intr" 5, so the guest's handler is at
+         * interrupt level 5: interrupt bit 9 (SBus level 3) raises it.
+         */
+        sysbus_connect_irq(s, 0, slavio_irq[9]);
     }
 
     if (hwdef->dbri_base) {
@@ -1139,6 +1154,7 @@ static void sun4m_machine_class_init(ObjectClass *oc, const void *data)
     mc->default_boot_order = "c";
     mc->default_display = "tcx";
     mc->default_ram_id = "sun4m.ram";
+    machine_add_audiodev_property(mc);
 
     object_class_property_add_bool(oc, "sunos-idle", sun4m_get_sunos_idle,
                                    sun4m_set_sunos_idle);
