@@ -5,6 +5,9 @@ cs4231_mem_readl_dreg(uint32_t reg, uint32_t ret) "read dreg %d: 0x%02x"
 cs4231_mem_readl_reg(uint32_t reg, uint32_t ret) "read reg %d: 0x%08x"
 cs4231_mem_writel_reg(uint32_t reg, uint32_t old, uint32_t val) "write reg %d: 0x%08x -> 0x%08x"
 cs4231_mem_writel_dreg(uint32_t reg, uint32_t old, uint32_t val) "write dreg %d: 0x%02x -> 0x%02x"
+cs4231_play_format(int freq, int channels, int fmt) "playback %d Hz, %d channels, format %d"
+cs4231_play_next(uint32_t va, uint32_t count) "playback buffer 0x%08x, %u bytes"
+cs4231_play_empty(void) "playback pipe empty"
 
 # es1370.c
 es1370_frame_address_rd(int ch, uint32_t addr) "ch=%d addr=0x%08x"
