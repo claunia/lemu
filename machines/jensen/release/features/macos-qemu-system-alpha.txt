@@ -82,6 +82,7 @@ device isa-parallel
 device isa-serial
 device isa-vga
 device jensen-aha1742
+device jensen-de422
 device jensen-mpu401
 device kvaser_pci
 device loader
