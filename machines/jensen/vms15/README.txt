@@ -14,6 +14,7 @@ DECwindows: the Jensen's graphics card for DECwindows (a Compaq QVision) is not 
  3. In VMS (console or telnet): @SYS$MANAGER:XLOGIN 192.168.1.10:0 (or :1 for display 1).
  4. Log in to DECwindows. After End Session the login box comes back, until your X server stops.
  From a telnet session you can also start single programs: SET DISPLAY/CREATE/NODE=192.168.1.10/TRANSPORT=TCPIP/SERVER=0, then RUN SYS$SYSTEM:DECW$CLOCK.
+ Paint needs 256 colors: on a 24-bit display it does not open (run from telnet it stops with ACCVIO). XQuartz: Settings, Output, Colors: 256 Colors, then restart XQuartz. Xvfb: -screen 0 1280x1024x8. DECterm, Calendar, Clock, Calculator, Cardfiler, Notepad, Puzzle, Bookreader and Mail work in 24 bits too.
 QEMU monitor: Ctrl-Alt-2 (back with Ctrl-Alt-1). The CD-ROM (DKA400, an RRD42) and the floppy are empty: change cd0 file.iso, change fd0 file.img. To use a CD in VMS: MOUNT/OVERRIDE=IDENTIFICATION DKA400:.
 macOS: if the binary is blocked, run xattr -cr . in this folder.
 
