@@ -1,6 +1,6 @@
 # One build for all kits
 
-These scripts build QEMU once for all the kits: the eight binaries the
+These scripts build QEMU once for all the kits: the nine binaries the
 kits use, for macOS, Linux and Windows. Each machine's own `release/`
 folder then packs its kits from that one build. Without them, each of
 the five release folders builds its own QEMU, so a full set of kits
@@ -17,6 +17,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-hppa | hpux1020b160l, hpux905-715, hpux907-715, hpux11v1b160l | `../hppa/release/mkrelease.sh` |
 | qemu-system-i386 | nt351x86, aix13ps2 | `../pc/release/pack.sh` |
 | qemu-system-sparc | sunos414 | `../sun4m/release/mkrelease.sh` |
+| qemu-system-m68k | aux311q800 | `../q800/release/mkrelease.sh` |
 
 Run them on an Apple Silicon Mac with Homebrew and Docker. The Linux and
 Windows builds run in Docker.
@@ -75,6 +76,7 @@ these folders in place of their own build, for example:
     sh ../hppa/release/mkrelease.sh hpux907 VMDIR STAGE/hppa hpux907-715-lemu.tar.lz
     sh ../hppa/release/mkrelease.sh hpux11v1 VMDIR STAGE/hppa hpux11v1b160l-lemu.tar.lz
     sh ../sun4m/release/mkrelease.sh sunos414 VMDIR STAGE/sparc sunos414-lemu.tar.lz
+    sh ../q800/release/mkrelease.sh aux311 VMDIR STAGE/m68k aux311q800-lemu.tar.lz
 
 - `VMDIR`, `SRCDIR` and `KITDIR` hold the guest files: disk, NVRAM and
   firmware. See each machine's notes.
@@ -87,7 +89,7 @@ these folders in place of their own build, for example:
 - Boot each kit on the Mac. Move the mouse, click something, check that
   the monitor answers, and look at every screen, not only the main one.
 - Linux: `../rm200/release/ltest.sh`, `../jensen/release/ltest.sh` and,
-  for the PowerPC, HP-UX and SunOS kits,
+  for the PowerPC, HP-UX, SunOS and A/UX kits,
   `ltest-ppc.sh amd64|arm64 KITCOPY BINARY`. Use
   copies of the unpacked kits: a boot writes to the disk.
 - The Windows build is not run.
