@@ -11,7 +11,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-ppc | aix415rs6k, aix433rs6k, aix51rs6k, nt351powerpc, nt40powerpc, os2powerpc, sol251powerpc | `../40p/release/mkrelease.sh` |
 | qemu-system-ppc | aix325rs6000 | `../7006/release/mkrelease.sh` |
 | qemu-system-ppc64 | aix53pseries, aix61pseries, aix71pseries, aix72pseries | `../pseries/release/mkrelease.sh` |
-| qemu-system-alpha | nt31axp, nt351axp, nt40axp | `../jensen/release/pack.sh` |
+| qemu-system-alpha | nt31axp, nt351axp, nt40axp, vms15axp | `../jensen/release/pack.sh` |
 | qemu-system-mips64el | nt31mips, nt351-jazz, nt351-rm200, nt4-jazz, nt4-rm200, nt4-rm200-smp, nt4srv-rm300-smp4 | `../rm200/release/pack.sh` |
 | qemu-system-mips64 | sinixn545 | `../rm200/release/pack.sh` |
 | qemu-system-hppa | hpux1020b160l, hpux905-715, hpux907-715, hpux11v1b160l | `../hppa/release/mkrelease.sh` |

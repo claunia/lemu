@@ -2,17 +2,18 @@
 
 Scripts that build the portable QEMU for the Jensen kits on macOS, Linux
 and Windows, check that nothing is missing, and pack the kits. One build
-serves all three kits:
+serves all four kits:
 
 | Kit | Guest | Disk |
 |---|---|---|
 | nt31axp-lemu | Windows NT 3.1 (build 511, SP3) | nt31.qcow2 |
 | nt40axp-lemu | Windows NT 4.0 Workstation (build 1381, SP6a) | nt40.qcow2 |
 | nt351axp-lemu | Windows NT 3.51 Workstation (build 1057, SP5) | nt351.qcow2 |
+| vms15axp-lemu | OpenVMS AXP V1.5-1H1, UCX V3.0, DECwindows Motif V1.1 | vms15.qcow2 |
 
-A kit has run.sh, run.cmd and README.txt from `../nt31`, `../nt40` or `../nt351`, the
+A kit has run.sh, run.cmd and README.txt from `../nt31`, `../nt40`, `../nt351` or `../vms15`, the
 disk, the flash (feprom0.bin, feprom1.bin), the NVRAM (rtc.bin), the
-firmware (fw/) and the binaries in bin/.
+firmware (fw/: the V2.2 firmware, and for NT the S3 card's BIOS) and the binaries in bin/.
 
 ## Build
 
@@ -54,6 +55,7 @@ What each platform gets:
     sh pack.sh nt31 VMDIR $OUT nt31axp-lemu.tar.lz
     sh pack.sh nt40 VMDIR $OUT nt40axp-lemu.tar.lz
     sh pack.sh nt351 VMDIR $OUT nt351axp-lemu.tar.lz
+    sh pack.sh vms15 VMDIR $OUT vms15axp-lemu.tar.lz
     sh verify.sh WORKDIR nt31axp-lemu.tar.lz nt40axp-lemu.tar.lz
     sh ltest.sh amd64 ubuntu:24.04 KITCOPY
 
@@ -64,4 +66,5 @@ What each platform gets:
 - `ltest.sh` runs the Linux binary in a clean container: the feature check,
   then a 40 s boot. Use a copy of an unpacked kit, because the boot writes
   to the disk. Run it for amd64 and arm64.
-- Then boot each kit on the Mac to the desktop.
+- Then boot each kit on the Mac to the desktop, or for VMS to the
+  `Username:` prompt.

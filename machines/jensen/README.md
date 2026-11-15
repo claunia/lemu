@@ -10,7 +10,9 @@ and OpenVMS AXP V1.5-1H1. Windows 2000 dropped the Jensen.
 | Folder | What |
 |---|---|
 | `nt31/` | run.sh, run.cmd and README.txt of the nt31axp-lemu kit |
+| `nt351/` | the same for the nt351axp-lemu kit |
 | `nt40/` | the same for the nt40axp-lemu kit |
+| `vms15/` | the same for the vms15axp-lemu kit (OpenVMS) |
 | `release/` | build, check and pack the kits |
 
 ## Machine options

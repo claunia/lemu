@@ -20,5 +20,6 @@ all       machine  jensen          # both kits
 all       device   jensen-aha1742  # the SCSI adapter in run.sh
 all       device   scsi-hd         # the kit disks
 all       device   scsi-cd         # the empty CD-ROM drive in run.sh
-all       device   ne2k_isa        # the network card in run.sh
+all       device   ne2k_isa        # the network card in the NT kits' run.sh
+all       device   jensen-de422    # the network card in the vms15 kit's run.sh
 all       device   sb16            # the sound card, -device sb16
