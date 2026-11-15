@@ -39,6 +39,13 @@ find "$top/pc-bios/keymaps" -type f ! -name meson.build \
 for p in $plats; do
     cp -a "$bin/$p" "$r/bin/"
 done
+# without the S3 card (VMS) QEMU looks up the VGA BIOS by name
+case $g in vms*)
+    mkdir -p "$r/bin/windows-x86_64/share"
+    cp "$top/pc-bios/vgabios-cirrus.bin" "$r/bin/share/qemu/"
+    cp "$top/pc-bios/vgabios-cirrus.bin" "$r/bin/windows-x86_64/share/"
+    ;;
+esac
 
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 \
     --uname root --gname root -C "$t" -cf - $k | plzip -9 > "$out.tmp"
