@@ -4714,11 +4714,26 @@ static bool trans_STDFQ(DisasContext *dc, arg_STDFQ *a)
 #endif
 }
 
+/*
+ * V9 has LDFSR and STFSR only with rd 0 (rd 1 is LDXFSR and STXFSR, rd 3
+ * LDXEFSR). V7 and V8 chips ignore rd, and old SunOS binaries have rd 4
+ * there: the _sigtramp of an old static libc saves the FSR with c92ba0e0.
+ * So sparc32 takes any rd.
+ */
+static bool fsr_rd_ok(DisasContext *dc, int rd)
+{
+    return !avail_64(dc) || rd == 0;
+}
+
 static bool trans_LDFSR(DisasContext *dc, arg_r_r_ri *a)
 {
-    TCGv addr = gen_ldst_addr(dc, a->rs1, a->imm, a->rs2_or_imm);
+    TCGv addr;
     TCGv_i32 tmp;
 
+    if (!fsr_rd_ok(dc, a->rd)) {
+        return false;
+    }
+    addr = gen_ldst_addr(dc, a->rs1, a->imm, a->rs2_or_imm);
     if (addr == NULL) {
         return false;
     }
@@ -4794,7 +4809,11 @@ static bool do_stfsr(DisasContext *dc, arg_r_r_ri *a, MemOp mop)
     return advance_pc(dc);
 }
 
-TRANS(STFSR, ALL, do_stfsr, a, MO_BEUL)
+static bool trans_STFSR(DisasContext *dc, arg_r_r_ri *a)
+{
+    return fsr_rd_ok(dc, a->rd) && do_stfsr(dc, a, MO_BEUL);
+}
+
 TRANS(STXFSR, 64, do_stfsr, a, MO_BEUQ)
 
 static bool do_fc(DisasContext *dc, int rd, int32_t c)

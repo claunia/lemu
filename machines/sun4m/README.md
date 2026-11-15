@@ -93,6 +93,16 @@ other keys on its left side have no key on a PC or Mac keyboard.
   then `mount -rt hsfs /dev/sr0 /cdrom` in SunOS.
 - SunOS says `sr0: Unrecongized Vendor 'QEMU'` at boot and uses the drive.
 
+## Old programs and the FPU state
+
+- Some old static SunOS programs save the FPU state in their signal handler
+  with `st %fsr` and `ld %fsr` words that have rd 4 (c92ba0e0, c90ba0e0, from
+  an old libc's `_sigtramp`). Real V7 and V8 chips ignore rd there.
+- QEMU 8.2 and later raised an illegal instruction for them, so these
+  programs died with SIGILL at their first signal. One is `islandLIC`, the
+  licence daemon of Island Productivity Series 3.0 (1992). LEMU takes any rd
+  on sparc32 (`fsr_rd_ok` in `target/sparc/translate.c`).
+
 ## Testing a change
 
 Work on a copy of the disk, with user networking, never bridged:
