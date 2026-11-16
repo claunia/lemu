@@ -5126,6 +5126,46 @@ static const HpuxInsnWord hpux9_x11_calibrate_dld[] = {
 };
 
 /*
+ * The X servers of HP-UX 11.00 count up to 200000 in r7 the same way, but
+ * the compiler puts the address of the counter in a register before each
+ * access. The counter is at -34(sp) in the server of patches PHSS_26608 and
+ * PHSS_26620 (built 18 October 2002) and at -54(sp) in the one of PHSS_20141
+ * (built 13 September 1999). The words start where gettimeofday() returns,
+ * one insn before the store that clears the counter.
+ */
+static const HpuxInsnWord hpux11_x11_calibrate[] = {
+    { 0x00, 0x37dc3f99 },       /* ldo   -34(sp),ret0 */
+    { 0x04, 0x0f8012a0 },       /* stw   r0,0(ret0)           count = 0 */
+    { 0x08, 0x37d63f99 },       /* ldo   -34(sp),r22 */
+    { 0x0c, 0x0ec010b4 },       /* ldw   0(r22),r20 */
+    { 0x10, 0x88f44042 },       /* cmpb,>=,n r20,r7,done */
+    { 0x14, 0x37d33f99 },       /* ldo   -34(sp),r19 */
+    { 0x18, 0x0e6010ba },       /* ldw   0(r19),r26 */
+    { 0x1c, 0x374a0002 },       /* ldo   1(r26),r10 */
+    { 0x20, 0x37df3f99 },       /* ldo   -34(sp),r31 */
+    { 0x24, 0x0fea12a0 },       /* stw   r10,0(r31)           count++ */
+    { 0x28, 0x37dd3f99 },       /* ldo   -34(sp),ret1 */
+    { 0x2c, 0x0fa010b9 },       /* ldw   0(ret1),r25 */
+    { 0x30, 0x80f95fc7 },       /* cmpb,<,n r25,r7,loop */
+};
+
+static const HpuxInsnWord hpux11_x11_calibrate_1999[] = {
+    { 0x00, 0x37dc3f59 },       /* ldo   -54(sp),ret0 */
+    { 0x04, 0x0f8012a0 },       /* stw   r0,0(ret0)           count = 0 */
+    { 0x08, 0x37d63f59 },       /* ldo   -54(sp),r22 */
+    { 0x0c, 0x0ec010b4 },       /* ldw   0(r22),r20 */
+    { 0x10, 0x88f44042 },       /* cmpb,>=,n r20,r7,done */
+    { 0x14, 0x37d33f59 },       /* ldo   -54(sp),r19 */
+    { 0x18, 0x0e6010ba },       /* ldw   0(r19),r26 */
+    { 0x1c, 0x374a0002 },       /* ldo   1(r26),r10 */
+    { 0x20, 0x37df3f59 },       /* ldo   -54(sp),r31 */
+    { 0x24, 0x0fea12a0 },       /* stw   r10,0(r31)           count++ */
+    { 0x28, 0x37dd3f59 },       /* ldo   -54(sp),ret1 */
+    { 0x2c, 0x0fa010b9 },       /* ldw   0(ret1),r25 */
+    { 0x30, 0x80f95fc7 },       /* cmpb,<,n r25,r7,loop */
+};
+
+/*
  * At the first insn of a TB: if it starts that counting, let
  * helper_hpux_x11_pace() make the round last long enough to count.
  * Returns true if the words matched.
@@ -5370,6 +5410,12 @@ static void hppa_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
             } else if (insn == hpux9_x11_calibrate[0].insn) {
                 gen_hpux_x11_pace(ctx, env, hpux9_x11_calibrate,
                                   ARRAY_SIZE(hpux9_x11_calibrate));
+            } else if (insn == hpux11_x11_calibrate[0].insn) {
+                gen_hpux_x11_pace(ctx, env, hpux11_x11_calibrate,
+                                  ARRAY_SIZE(hpux11_x11_calibrate));
+            } else if (insn == hpux11_x11_calibrate_1999[0].insn) {
+                gen_hpux_x11_pace(ctx, env, hpux11_x11_calibrate_1999,
+                                  ARRAY_SIZE(hpux11_x11_calibrate_1999));
             }
         }
 #endif

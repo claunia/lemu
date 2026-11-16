@@ -1047,8 +1047,8 @@ static void hppa_machine_common_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_bool(oc, "hpux-x11-pace", hppa_get_hpux_x11_pace,
                                    hppa_set_hpux_x11_pace);
     object_class_property_set_description(oc, "hpux-x11-pace",
-        "Slow down the timer calibration of the HP-UX 10.20 X server, "
-        "which divides by zero when the CPU is fast");
+        "Slow down the timer calibration of the HP-UX 9.x, 10.20 and 11.00 "
+        "X servers, which divide by zero when the CPU is fast");
 }
 
 static void HP_B160L_machine_init_class_init(ObjectClass *oc, const void *data)
