@@ -897,8 +897,9 @@ static int cirrus_bitblt_cputovideo(CirrusVGAState * s)
     } else {
         if (s->cirrus_blt_mode & CIRRUS_BLTMODE_COLOREXPAND) {
             w = s->cirrus_blt_width / s->cirrus_blt_pixelwidth;
+            /* each line starts on a dword: the pitch is in bytes */
             if (s->cirrus_blt_modeext & CIRRUS_BLTMODEEXT_DWORDGRANULARITY)
-                s->cirrus_blt_srcpitch = ((w + 31) >> 5);
+                s->cirrus_blt_srcpitch = ((w + 31) >> 5) << 2;
             else
                 s->cirrus_blt_srcpitch = ((w + 7) >> 3);
         } else {
