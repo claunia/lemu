@@ -72,40 +72,14 @@ The MCP server works on macOS and Linux. All the details are in
 
 ## Farms and labs: many VMs at once
 
-Agents run 10 to 25 LEMU VMs at once on one Mac, to build or test software
-on many old systems.
+Agents run 10 or more VMs at once to build or test software on many systems:
 
-1. **Copy** a kit, or your own VM while it is off, one folder per VM:
-   `cp -c -R` on macOS, `cp -R --reflink=auto` on Linux. Never start the
-   originals.
-2. **Make the guest reachable** before you copy it: an rsh, ssh or telnet
-   server, automatic logon, and the build tools on the system-wide PATH.
-   Most NT kits have the rsh server ntrshd.
-3. **Ports:** each kit forwards its own ports on 127.0.0.1, and no two kits
-   share one. Two copies of one kit need new ports in the copy's `run.sh`.
-4. **Start** each VM from a shell with its own `-name` (the tools find VMs
-   by name). `< /dev/null` lets a `run.sh` with `-monitor stdio` run in the
-   background:
-
-       ./run.sh -name nt40axp -display none -audio none < /dev/null > nt40axp.log 2>&1 &
-
-| To | Use |
-|---|---|
-| Wait for a VM | `vm-wait` until `up`, then until `port` with its rsh or ssh port |
-| List the VMs | `vm-list` |
-| Run commands | [rsh-mcp](https://github.com/tenox7/rsh-mcp) or [ssh-mcp](https://github.com/tenox7/ssh-mcp) with host `127.0.0.1` and the VM's port. Telnet: `serial-connect`, then `serial-run` |
-| Copy files | rsh-mcp `upload` and `download`, or `media` `insert` with `files` |
-| See the screen | `screenshot`. People: `-rdp localhost:3390` or `-vnc localhost:1`, one port per VM |
-| Stop a VM | `vm-power` `quit`, then `vm-wait` until `gone`. Not `kill -9`: a qcow2 disk can lose data |
-
-| Trap | Fix |
-|---|---|
-| A copy of a bridged VM has the original's MAC and IP | Run copies on NAT: `-nic user` |
-| A build outlasts the remote call | Run it in the background in the guest; let it write a file when done |
-| Too many busy guests | Idle guests cost little. Plan one host core per busy guest CPU; `vm-stats` shows the load |
-| Two agents want one VM | A VM serves one MCP client at a time: ask the session that started it |
-| Windows NT: programs started over rsh don't show | Start GUI programs with the keyboard and mouse tools |
-| rshd asks for no password | Keep its port on 127.0.0.1, as the kits do |
+1. Copy each kit or VM (while it is off) to its own folder: `cp -c -R` on macOS.
+2. Start each one in the background with its own name:
+   `./run.sh -name nt40axp -display none -audio none < /dev/null > nt40axp.log 2>&1 &`
+3. `vm-wait` for its rsh or ssh port (see its `run.sh`), then run commands with
+   [rsh-mcp](https://github.com/tenox7/rsh-mcp) or [ssh-mcp](https://github.com/tenox7/ssh-mcp)
+   on 127.0.0.1. Stop it with `vm-power` `quit`.
 
 ## Rules
 
