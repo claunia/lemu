@@ -70,23 +70,6 @@ Windows NT 3.1 on the PC has no kit, so its `run.sh` is an example.
 The MCP server works on macOS and Linux. All the details are in
 [MCP.md](MCP.md).
 
-## Remote desktop (RDP)
-
-`-rdp` serves the guest's screen, keyboard and mouse to RDP clients, like `-vnc`.
-
-| You want | Options |
-|---|---|
-| Only this computer, TLS, no password | `-rdp localhost:3389` |
-| A password | `-object secret,id=pw,file=pw.txt -rdp localhost:3389,password-secret=pw` |
-| The password only over TLS | add `,plain-login=off` |
-| No TLS (plain RDP) | add `,tls=off` |
-| The same certificate every run | add `,tls-key=rdp-key.pem` (made on the first run) |
-| Other computers too | `-rdp 3389` (every network: set a password) |
-
-- Make the password file without a newline: `printf '%s' 'secret' > pw.txt`
-- One client has the screen at a time. A new one takes over once it has logged on.
-- Tested with FreeRDP. More in [ui/rdp](ui/rdp/README.md).
-
 ## Farms and labs: many VMs at once
 
 Agents run 10 to 25 LEMU VMs at once on one Mac, to build or test software
