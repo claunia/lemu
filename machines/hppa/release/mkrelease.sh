@@ -7,12 +7,13 @@
 # hpux905: HP-UX 9.05 on the HP 9000/715; VMDIR holds the disk hpux905.qcow2.
 # hpux907: HP-UX 9.07 on the HP 9000/715; VMDIR holds the disk hpux907.qcow2.
 # hpux907nnm: HP-UX 9.07 with OpenView NNM 3.3 on the 715; VMDIR holds hpux907.qcow2.
+# hpux1100: HP-UX 11.00 on the HP B160L; VMDIR holds the disk hpux1100.qcow2.
 # hpux11v1: HP-UX 11i v1 on the HP B160L; VMDIR holds the disk hpux.img (qcow2).
 # The pack converts the disk, which leaves its snapshots (savevm) out.
 # BINDIR is STAGE/hppa from ../../release/stage.sh.
-# usage: mkrelease.sh hpux1020|hpux1020nnm|hpux905|hpux907|hpux907nnm|hpux11v1 VMDIR BINDIR OUT.tar.lz
+# usage: mkrelease.sh hpux1020|hpux1020nnm|hpux905|hpux907|hpux907nnm|hpux1100|hpux11v1 VMDIR BINDIR OUT.tar.lz
 set -e
-[ $# -eq 4 ] || { echo "usage: $0 hpux1020|hpux1020nnm|hpux905|hpux907|hpux907nnm|hpux11v1 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
+[ $# -eq 4 ] || { echo "usage: $0 hpux1020|hpux1020nnm|hpux905|hpux907|hpux907nnm|hpux1100|hpux11v1 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 os=$1 vm=$2 bin=$3 out=$4
 case $os in
@@ -21,6 +22,7 @@ hpux1020nnm) name=hpux1020b160l-nnm-lemu img=$vm/hpux.img ;;
 hpux905) name=hpux905-715-lemu img=$vm/hpux905.qcow2 ;;
 hpux907) name=hpux907-715-lemu img=$vm/hpux907.qcow2 ;;
 hpux907nnm) name=hpux907-715-nnm-lemu img=$vm/hpux907.qcow2 ;;
+hpux1100) name=hpux1100b160l-lemu img=$vm/hpux1100.qcow2 ;;
 hpux11v1) name=hpux11v1b160l-lemu img=$vm/hpux.img ;;
 *) echo "unknown OS: $os" >&2; exit 1 ;;
 esac

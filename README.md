@@ -45,7 +45,7 @@ Windows NT 3.1 on the PC has no kit, so its `run.sh` is an example.
 | IBM 40P (7020-40P, PReP, PowerPC 604) | [AIX 4.1.5](machines/40p/aix41/run.sh), [AIX 4.3.3](machines/40p/aix43/run.sh), [AIX 5.1](machines/40p/aix51/run.sh), [Windows NT 3.51](machines/40p/nt351/run.sh), [Windows NT 4.0](machines/40p/nt/run.sh), [OS/2 Warp](machines/40p/os2/run.sh), [Solaris 2.5.1](machines/40p/solaris/run.sh) |
 | IBM RS/6000 7006-41T (PowerPC 601) | [AIX 3.2.5](machines/7006/aix325/run.sh) |
 | IBM pSeries (POWER7, POWER8) | [AIX 5.3](machines/pseries/aix53/run.sh), [AIX 6.1](machines/pseries/aix61/run.sh), [AIX 7.1](machines/pseries/aix71/run.sh), [AIX 7.2](machines/pseries/aix72/run.sh) |
-| HP B160L (PA-RISC 1.1, PA-7300LC, 4 CPUs) | [HP-UX 10.20](machines/hppa/hpux1020/run.sh) ([with OpenView NNM](machines/hppa/hpux1020nnm/run.sh)), [HP-UX 11i v1](machines/hppa/hpux11v1/run.sh) |
+| HP B160L (PA-RISC 1.1, PA-7300LC, 4 CPUs) | [HP-UX 10.20](machines/hppa/hpux1020/run.sh) ([with OpenView NNM](machines/hppa/hpux1020nnm/run.sh)), [HP-UX 11.00](machines/hppa/hpux1100/run.sh), [HP-UX 11i v1](machines/hppa/hpux11v1/run.sh) |
 | HP 9000/715 (PA-RISC 1.1, PA-7100LC) | [HP-UX 9.05](machines/hppa/hpux905/run.sh), [HP-UX 9.07](machines/hppa/hpux907/run.sh) ([with OpenView NNM](machines/hppa/hpux907nnm/run.sh)) |
 | Apple Quadra 800 (68040) | [A/UX 3.1.1](machines/q800/aux311/run.sh) |
 | Sun SPARCstation 5 (sun4m, microSPARC II) | [SunOS 4.1.4](machines/sun4m/sunos414/run.sh) |
