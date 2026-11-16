@@ -5027,11 +5027,68 @@ static const HpuxInsnWord hpux11_idle_loop[] = {
 };
 
 /*
+ * The idle loop of the HP-UX 11.00 kernel (idle() in the kernel of LEMU's
+ * 11.00 kit: B.11.00 with the Quality Pack of March 2004): the top of a
+ * round, which is where helper_hpux1100_idle() looks (each round starts
+ * there), where r4 and r7 are set at the start of idle(), the stop request
+ * that -d8(sp) points to, and the loads of the words that the helper reads
+ * too. Nothing is masked: a kernel built or linked differently keeps
+ * spinning.
+ */
+static const HpuxInsnWord hpux1100_idle_loop[] = {
+    { 0x000, 0x4bd13ef1 },      /* ldw   -88(sp),r17          per-processor */
+    { -0x158, 0x030008a6 },     /* mfctl tr0,r6 */
+    { -0x150, 0x48c40058 },     /* ldw   2c(r6),r4            its number */
+    { -0x14c, 0x48c80218 },     /* ldw   10c(r6),r8           its thread */
+    { -0x090, 0x34c70cb8 },     /* ldo   65c(r6),r7           run queue */
+    { 0x01c, 0x88043178 },      /* cmpb,<> r4,r0,...          not the first */
+    { 0x024, 0x4bd93e51 },      /* ldw   -d8(sp),r25 */
+    { 0x028, 0x0b310a1d },      /* add,l r17,r25,ret1 */
+    { 0x030, 0x4bb30000 },      /* ldw   0(ret1),r19          stop request */
+    { 0x034, 0x92603004 },      /* cmpiclr,<> 2,r19,r0 */
+    { 0x040, 0x2b750000 },      /* addil L%2a000,dp,r1 */
+    { 0x044, 0x483f0580 },      /* ldw   2c0(r1),r31          rtsched_info */
+    { 0x050, 0x48fa0018 },      /* ldw   c(r7),r26            queue counts */
+    { 0x058, 0x48fd0028 },      /* ldw   14(r7),ret1 */
+    { 0x068, 0x48f60010 },      /* ldw   8(r7),r22 */
+    { 0x070, 0x48fc0020 },      /* ldw   10(r7),ret0 */
+    { 0x098, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x09c, 0x483209f0 },      /* ldw   4f8(r1),r18          in reboot */
+    { 0x0a8, 0x4a3201b0 },      /* ldw   d8(r17),r18          a call */
+    { 0x0b4, 0x4b7724f1 },      /* ldw   -d88(dp),r23 */
+    { 0x0c0, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x0c4, 0x483101e8 },      /* ldw   f4(r1),r17           owner */
+    { 0x0c8, 0x863f33c0 },      /* cmpib,= -1,r17,... */
+    { 0x0d0, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x0d4, 0x483801b0 },      /* ldw   d8(r1),r24           no_other_runqs */
+    { 0x0dc, 0x88183e3f },      /* cmpb,<>,n r24,r0,top */
+    { 0x0e4, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x0e8, 0x482101e8 },      /* ldw   f4(r1),r1 */
+    { 0x0f0, 0x88813e17 },      /* cmpb,<>,n r1,r4,top */
+    { 0x0fc, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x100, 0x483f0728 },      /* ldw   394(r1),r31          runningprocs */
+    { 0x114, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x118, 0x48210718 },      /* ldw   38c(r1),r1           mpproc_info */
+    { 0x124, 0x22e10000 },      /* ldil  L%2000,r23 */
+    { 0x128, 0x36f71480 },      /* ldo   a40(r23),r23         its stride */
+    { 0x148, 0x81403d67 },      /* cmpb,=,n r0,r10,top */
+    { 0x1fc, 0x4bdc3e29 },      /* ldw   -ec(sp),ret0         another one */
+    { 0x200, 0x0b1c0a0c },      /* add,l ret0,r24,r12 */
+    { 0x204, 0x358b0cb8 },      /* ldo   65c(r12),r11 */
+    { 0x208, 0x49610010 },      /* ldw   8(r11),r1 */
+    { 0x8d0, 0x20c10000 },      /* ldil  L%2000,r6 */
+    { 0x8d4, 0x34c213f0 },      /* ldo   9f8(r6),rp */
+    { 0x8dc, 0x6bc23e51 },      /* stw   rp,-d8(sp) */
+    { 0x8e0, 0x2b7fcfff },      /* addil L%-2000,dp,r1 */
+    { 0x8e4, 0x483501d8 },      /* ldw   ec(r1),r21           run_as_up */
+};
+
+/*
  * At the first insn of a TB: if it starts the idle loop's check of the run
- * queue, let the helper for HP-UX @version (9: 9.05, 10: 10.20, 11: 11.11)
- * halt the vCPU before the loop runs it. When the vCPU wakes up, the insn
- * queue says to run it again. For 9.05, @runq is where the four run queue
- * counts start in mpproc_info.
+ * queue, let the helper for HP-UX @version (9: 9.05, 10: 10.20, 1100: 11.00,
+ * 11: 11.11) halt the vCPU before the loop runs it. When the vCPU wakes up,
+ * the insn queue says to run it again. For 9.05, @runq is where the four run
+ * queue counts start in mpproc_info.
  */
 static void gen_hpux_idle(DisasContext *ctx, CPUHPPAState *env,
                           const HpuxInsnWord *words, int n, int version,
@@ -5064,6 +5121,9 @@ static void gen_hpux_idle(DisasContext *ctx, CPUHPPAState *env,
         break;
     case 11:
         gen_helper_hpux11_idle(tcg_env);
+        break;
+    case 1100:
+        gen_helper_hpux1100_idle(tcg_env);
         break;
     default:
         g_assert_not_reached();
@@ -5229,10 +5289,12 @@ static const HpuxInsnWord hpux_bell_stores[2][9] = {
  * wakes the vCPU that waits for it after each of these stores. Each word is
  * given as the offset from the store, which is the third one.
  */
-static const struct {
+typedef struct {
     bool rt;
     HpuxInsnWord words[6];
-} hpux11_bell_stores[] = {
+} HpuxBellStore;
+
+static const HpuxBellStore hpux11_bell_stores[] = {
     { false, {
         { -8, 0x48e20010 },     /* ldw   8(r7),rp */
         { -4, 0x34490002 },     /* ldo   1(rp),r9 */
@@ -5254,6 +5316,47 @@ static const struct {
         { -12, 0x49410040 },    /* ldw   20(r10),r1 */
         { 4, 0x48e90020 },      /* ldw   10(r7),r9 */
         { 12, 0x68ff0020 },     /* stw   r31,10(r7) */
+    } },
+};
+
+/*
+ * The places where the HP-UX 11.00 scheduler (_setrq()) hands a thread to a
+ * processor: it adds one to a count of the run queue at r8, which is the
+ * processor structure + 0x65c (for a thread that is bound to the processor
+ * or not), or to the count of the real-time queue (rtsched_info).
+ * helper_hpux1100_bell() wakes the vCPU that waits for it after each of
+ * these stores. Each word is given as the offset from the store, which is
+ * the third one.
+ */
+static const HpuxBellStore hpux1100_bell_stores[] = {
+    { false, {
+        { -8, 0x49170010 },     /* ldw   8(r8),r23 */
+        { -4, 0x36f80002 },     /* ldo   1(r23),r24 */
+        { 0, 0x0d181290 },      /* stw   r24,8(r8) */
+        { -24, 0x35280cb8 },    /* ldo   65c(r9),r8 */
+        { 4, 0x489901b8 },      /* ldw   dc(r4),r25 */
+        { 16, 0x491c0018 },     /* ldw   c(r8),ret0 */
+    } }, { false, {
+        { -8, 0x49020020 },     /* ldw   10(r8),rp */
+        { -4, 0x344a0002 },     /* ldo   1(rp),r10 */
+        { 0, 0x690a0020 },      /* stw   r10,10(r8) */
+        { 4, 0x489601b8 },      /* ldw   dc(r4),r22 */
+        { 16, 0x49140028 },     /* ldw   14(r8),r20 */
+        { 24, 0x69150028 },     /* stw   r21,14(r8) */
+    } }, { true, {
+        { -8, 0x4ab60000 },     /* ldw   0(r21),r22 */
+        { -4, 0x36dc0002 },     /* ldo   1(r22),ret0 */
+        { 0, 0x6bfc0580 },      /* stw   ret0,2c0(r31) */
+        { -20, 0x37e80588 },    /* ldo   2c4(r31),r8 */
+        { -16, 0x37f50580 },    /* ldo   2c0(r31),r21 */
+        { 4, 0xe81f1c3d },      /* b,l   ...,r0 */
+    } }, { true, {
+        { -8, 0x49580000 },     /* ldw   0(r10),r24 */
+        { -4, 0x37190002 },     /* ldo   1(r24),r25 */
+        { 0, 0x6bf90580 },      /* stw   r25,2c0(r31) */
+        { -20, 0x37e80588 },    /* ldo   2c4(r31),r8 */
+        { -16, 0x37ea0580 },    /* ldo   2c0(r31),r10 */
+        { 4, 0xe81f199d },      /* b,l   ...,r0 */
     } },
 };
 
@@ -5279,13 +5382,30 @@ static bool hpux_words_match(DisasContext *ctx, CPUHPPAState *env,
     return true;
 }
 
+/* Which of the @n stores @s is the insn just translated, or -1 */
+static int hpux_bell_store(DisasContext *ctx, CPUHPPAState *env,
+                           uint32_t insn, const HpuxBellStore *s, int n)
+{
+    for (int k = 0; k < n; k++) {
+        if (insn == s[k].words[2].insn
+            && hpux_words_match(ctx, env, s[k].words,
+                                ARRAY_SIZE(s[k].words))) {
+            trace_hppa_hpux_match("queue store", ctx->base.pc_next);
+            return k;
+        }
+    }
+    return -1;
+}
+
 /*
  * If the insn just translated is one of the stores above, ring the bell
  * after it.
  */
 static void gen_hpux_bell(DisasContext *ctx, CPUHPPAState *env, uint32_t insn)
 {
-    for (int k = 0; k < ARRAY_SIZE(hpux_bell_stores); k++) {
+    int k;
+
+    for (k = 0; k < ARRAY_SIZE(hpux_bell_stores); k++) {
         if (insn == hpux_bell_stores[k][2].insn
             && hpux_words_match(ctx, env, hpux_bell_stores[k],
                                 ARRAY_SIZE(hpux_bell_stores[k]))) {
@@ -5294,17 +5414,20 @@ static void gen_hpux_bell(DisasContext *ctx, CPUHPPAState *env, uint32_t insn)
             return;
         }
     }
-    for (int k = 0; k < ARRAY_SIZE(hpux11_bell_stores); k++) {
+    k = hpux_bell_store(ctx, env, insn, hpux11_bell_stores,
+                        ARRAY_SIZE(hpux11_bell_stores));
+    if (k >= 0) {
         bool rt = hpux11_bell_stores[k].rt;
 
-        if (insn == hpux11_bell_stores[k].words[2].insn
-            && hpux_words_match(ctx, env, hpux11_bell_stores[k].words,
-                                ARRAY_SIZE(hpux11_bell_stores[k].words))) {
-            trace_hppa_hpux_match("queue store", ctx->base.pc_next);
-            gen_helper_hpux11_bell(tcg_env, cpu_gr[rt ? 10 : 7],
-                                   tcg_constant_i32(rt));
-            return;
-        }
+        gen_helper_hpux11_bell(tcg_env, cpu_gr[rt ? 10 : 7],
+                               tcg_constant_i32(rt));
+        return;
+    }
+    k = hpux_bell_store(ctx, env, insn, hpux1100_bell_stores,
+                        ARRAY_SIZE(hpux1100_bell_stores));
+    if (k >= 0) {
+        gen_helper_hpux1100_bell(tcg_env, cpu_gr[8],
+                                 tcg_constant_i32(hpux1100_bell_stores[k].rt));
     }
 }
 #endif
@@ -5397,6 +5520,9 @@ static void hppa_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
             } else if (insn == hpux11_idle_loop[2].insn) {
                 gen_hpux_idle(ctx, env, hpux11_idle_loop,
                               ARRAY_SIZE(hpux11_idle_loop), 11, 0);
+            } else if (insn == hpux1100_idle_loop[0].insn) {
+                gen_hpux_idle(ctx, env, hpux1100_idle_loop,
+                              ARRAY_SIZE(hpux1100_idle_loop), 1100, 0);
             }
         }
         if (ctx->hpux_x11_pace && ctx->base.num_insns == 1) {
