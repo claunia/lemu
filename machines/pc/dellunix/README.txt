@@ -7,7 +7,7 @@ X runs 1280x1024 with 256 colours on the Cirrus card. For 65536 colours add -bpp
 The X server is XFree86 3.3.6 for UnixWare. It runs on Dell UNIX with a small library and a 71-byte patch; /usr/X11R6/README.dell says what they do. Dell's own X11R5 server, Xmach, is still in /usr/X5/bin.
 Installed: Dell UNIX with X11R5 (mwm, olwm, twm, xterm, xman, xv, xfig, tgif and many more in /usr/X5/bin), GNU emacs, gcc 2.1, gdb, make, perl 4, TeX and LaTeX with xdvi, tcsh 6.01, less, top, elm, rn and nn, kermit and the manual pages.
 Extra apps in /usr/local/bin (already in the PATH): bash 1.14.7, gzip, wget 1.5.3, ncftp, NCSA Mosaic 2.5 (mosaic) and 1.2 (xmosaic), and the JPEG tools.
-Web: mosaic & in the xterm. Mosaic 2.5 (1994) speaks plain HTTP only, sends no Host: header and saves pages that name a charset as files, so few sites work today. http://textfiles.com/ does.
+Web: mosaic & in the xterm. Mosaic 2.5 (1994) speaks plain HTTP only, sends no Host: header and saves pages that name a charset as files, so few sites work today. http://textfiles.com/ does, but Mosaic crashes on about half of its loads ("Congratulations, you have found a bug"): start it again.
 Network: a Western Digital WD8003E ISA card, set as Dell's driver wants it (I/O 0x280, IRQ 5, memory 0xD0000). QEMU user mode NAT; Dell UNIX keeps its address 192.168.1.111 (host name amnesia) with gateway and DNS 192.168.1.1, and this computer is 192.168.1.10. telnet localhost 22023 reaches Dell UNIX; the port listens on this computer only.
 The clock is the host's local time; Dell UNIX shows 2026 fine.
 Mouse: a Microsoft serial mouse on COM1. QEMU grabs it when you click in the window; Ctrl-Alt-G lets it go.
