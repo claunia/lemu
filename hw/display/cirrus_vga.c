@@ -1133,6 +1133,10 @@ static void cirrus_get_params(VGACommonState *s1,
     params->line_compare = s->vga.cr[0x18] |
         ((s->vga.cr[0x07] & 0x10) << 4) |
         ((s->vga.cr[0x09] & 0x40) << 3);
+    /* The vertical counter counts pairs of lines: see cirrus_get_resolution */
+    if (s->vga.cr[VGA_CRTC_MODE] & 0x04) {
+        params->line_compare = params->line_compare * 2 + 1;
+    }
 
     params->hpel = s->vga.ar[VGA_ATC_PEL];
     params->hpel_split = s->vga.ar[VGA_ATC_MODE] & 0x20;
@@ -1215,6 +1219,14 @@ static void cirrus_get_resolution(VGACommonState *s, int *pwidth, int *pheight)
         ((s->cr[0x07] & 0x02) << 7) |
         ((s->cr[0x07] & 0x40) << 3);
     height = (height + 1);
+    /*
+     * CR17 bit 2 clocks the vertical counter on every second line. The
+     * vertical registers have 10 bits, so a mode with more than 1024 lines
+     * in total needs it: XFree86 sets it for 1280x1024.
+     */
+    if (s->cr[VGA_CRTC_MODE] & 0x04) {
+        height = height * 2;
+    }
     /* interlace support */
     if (s->cr[0x1a] & 0x01)
         height = height * 2;
