@@ -15,7 +15,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-mips64el | nt31mips, nt351-jazz, nt351-rm200, nt4-jazz, nt4-rm200, nt4-rm200-smp, nt4srv-rm300-smp4 | `../rm200/release/pack.sh` |
 | qemu-system-mips64 | sinixn545 | `../rm200/release/pack.sh` |
 | qemu-system-hppa | hpux1020b160l, hpux905-715, hpux907-715, hpux11v1b160l | `../hppa/release/mkrelease.sh` |
-| qemu-system-i386 | nt351x86, aix13ps2, aix13ps2-tcf | `../pc/release/pack.sh` |
+| qemu-system-i386 | nt351x86, aix13ps2, aix13ps2-tcf, dellunix22 | `../pc/release/pack.sh` |
 | qemu-system-sparc | sunos414 | `../sun4m/release/mkrelease.sh` |
 | qemu-system-m68k | aux311q800 | `../q800/release/mkrelease.sh` |
 
@@ -72,6 +72,7 @@ these folders in place of their own build, for example:
     sh ../pc/release/pack.sh nt351 VMDIR STAGE/i386 nt351x86-lemu.tar.lz
     sh ../pc/release/pack.sh aix13 VMDIR STAGE/i386 aix13ps2-lemu.tar.lz
     sh ../pc/release/pack.sh aix13tcf VMDIR STAGE/i386 aix13ps2-tcf-lemu.tar.lz
+    sh ../pc/release/pack.sh dellunix VMDIR STAGE/i386 dellunix22-lemu.tar.lz
     sh ../rm200/release/pack.sh KITDIR qemu-system-mips64el STAGE/mips nt4-rm200-lemu.tar.lz
     sh ../hppa/release/mkrelease.sh hpux1020 VMDIR STAGE/hppa hpux1020b160l-lemu.tar.lz
     sh ../hppa/release/mkrelease.sh hpux905 VMDIR STAGE/hppa hpux905-715-lemu.tar.lz
