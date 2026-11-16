@@ -545,3 +545,9 @@ bcm2838_genet_tx_dma_ring_active(unsigned int ring, const char *ring_state) "rin
 bcm2838_genet_tx_request(unsigned int ring_idx, uint32_t prod_idx, uint32_t cons_idx) "ring %u, PROD_INDEX %u, CONS_INDEX %u"
 bcm2838_genet_tx(unsigned int ring_idx, uint64_t desc_idx, uint32_t desc_status, uint64_t data_addr) "ring %u, descriptor %" PRIu64 ": 0x%08x, data @ 0x%08" PRIx64
 bcm2838_genet_rx_dma_ring_active(unsigned int ring, const char *ring_state) "ring %u is %s"
+
+# wd8003.c
+wd8003_io_read(uint64_t addr, uint64_t val) "addr=0x%02" PRIx64 " val=0x%02" PRIx64
+wd8003_io_write(uint64_t addr, uint64_t val) "addr=0x%02" PRIx64 " val=0x%02" PRIx64
+wd8003_receive(size_t size, uint8_t curr, uint8_t bnry) "len=%zu curr=0x%02x bnry=0x%02x"
+wd8003_transmit(unsigned len, uint8_t tpsr) "len=%u tpsr=0x%02x"

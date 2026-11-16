@@ -162,3 +162,8 @@ config CAN_FLEXCAN
     bool
     depends on IMX_CCM
     select CAN_BUS
+
+config WD8003
+    bool
+    default y
+    depends on ISA_BUS
