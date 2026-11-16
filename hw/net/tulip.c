@@ -257,6 +257,18 @@ static ssize_t tulip_receive(TULIPState *s, const uint8_t *buf, size_t size)
             s->rx_frame_size = size + 4;
             s->rx_status = RDES0_LS |
                  ((s->rx_frame_size & RDES0_FL_MASK) << RDES0_FL_SHIFT);
+            /*
+             * Like the chip, mark group addresses (multicast and
+             * broadcast) and Ethernet II frames, whose type/length field
+             * is above 1500. The HP-UX 11.00 btlan driver drops a frame
+             * as an unknown protocol when FT is clear.
+             */
+            if (is_multicast_ether_addr(buf)) {
+                s->rx_status |= RDES0_MF;
+            }
+            if (lduw_be_p(buf + 12) > ETH_MTU) {
+                s->rx_status |= RDES0_FT;
+            }
             desc.status |= RDES0_FS;
             memcpy(s->rx_frame, buf, size);
             s->rx_frame_len = s->rx_frame_size;
