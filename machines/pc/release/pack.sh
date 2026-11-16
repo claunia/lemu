@@ -1,25 +1,30 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Pack a PC kit: the disk and firmware from VMDIR, run.sh, run.cmd and
+# Pack a PC kit: the disks and firmware from VMDIR, run.sh, run.cmd and
 # README.txt from ../GUEST, the binaries from BINDIR
-# usage: pack.sh nt351|aix13 VMDIR BINDIR OUT.tar.lz
-#   VMDIR   holds disk/GUEST.qcow2 and fw/928-n9.bin, for nt351 also
-#           fw/bios-nt351.bin; it is only read
+# usage: pack.sh nt351|aix13|aix13tcf VMDIR BINDIR OUT.tar.lz
+#   VMDIR   holds disk/DISK.qcow2 for each disk of the guest (GUEST.qcow2;
+#           aix13tcf: site1.qcow2 and site2.qcow2) and fw/928-n9.bin, for
+#           nt351 also fw/bios-nt351.bin; it is only read
 #   BINDIR  STAGE/i386 of ../../release/stage.sh
-# nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3).
+# nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3),
+# aix13tcf makes aix13ps2-tcf-lemu (two AIX PS/2 1.3 VMs as a TCF cluster).
 set -e
-[ $# -eq 4 ] || { echo "usage: $0 nt351|aix13 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
+[ $# -eq 4 ] || { echo "usage: $0 nt351|aix13|aix13tcf VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../../.." && pwd)
 g=$1 vm=$2 bin=$3
-# fw: files from VMDIR/fw; roms: files from pc-bios that QEMU looks up by name
+# disks: VMDIR/disk/DISK.qcow2 each; fw: files from VMDIR/fw;
+# roms: files from pc-bios that QEMU looks up by name
 case $g in
-nt351) k=nt351x86-lemu fw="bios-nt351.bin 928-n9.bin" roms= ;;
-aix13) k=aix13ps2-lemu fw=928-n9.bin roms=bios-256k.bin ;;
+nt351) k=nt351x86-lemu disks=nt351 fw="bios-nt351.bin 928-n9.bin" roms= ;;
+aix13) k=aix13ps2-lemu disks=aix13 fw=928-n9.bin roms=bios-256k.bin ;;
+aix13tcf) k=aix13ps2-tcf-lemu disks="site1 site2" fw=928-n9.bin roms=bios-256k.bin ;;
 *) echo "$0: no guest $g" >&2; exit 1 ;;
 esac
 [ -f "$here/../$g/run.sh" ] || { echo "$0: no guest $g in $here/.." >&2; exit 1; }
-for f in disk/$g.qcow2 $(for x in $fw; do echo fw/$x; done); do
+for f in $(for x in $disks; do echo disk/$x.qcow2; done) \
+         $(for x in $fw; do echo fw/$x; done); do
     [ -f "$vm/$f" ] || { echo "$0: no $vm/$f" >&2; exit 1; }
 done
 plats="macos-arm64 linux-x86_64 linux-aarch64 windows-x86_64"
@@ -32,7 +37,10 @@ trap 'rm -rf "$t"' EXIT
 r=$t/$k
 mkdir -p "$r/bin/share/qemu/keymaps"
 
-qemu-img convert -O qcow2 "$vm/disk/$g.qcow2" "$r/$g.qcow2"
+for x in $disks; do
+    qemu-img convert -O qcow2 "$vm/disk/$x.qcow2" "$r/$x.qcow2"
+    chmod 644 "$r/$x.qcow2"
+done
 if [ -n "$fw" ]; then
     mkdir -p "$r/fw"
     for x in $fw; do cp "$vm/fw/$x" "$r/fw/"; done
@@ -51,7 +59,6 @@ for x in kvmvapic.bin $roms; do
     cp "$top/pc-bios/$x" "$r/bin/share/qemu/"
     cp "$top/pc-bios/$x" "$r/bin/windows-x86_64/share/"
 done
-chmod 644 "$r/$g.qcow2"
 
 COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --uid 0 --gid 0 \
     --uname root --gname root -C "$t" -cf - $k | plzip -9 > "$out.tmp"
