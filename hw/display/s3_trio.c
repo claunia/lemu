@@ -396,6 +396,120 @@ static bool s3_rect_next(S3TrioState *s)
     return true;
 }
 
+/*
+ * Fast paths: a fill with one color, or a copy, a row at a time. They take
+ * only what gives the same pixels as the walk: the mix "new", all planes,
+ * no color compare, no pixel select from memory, and a destination inside
+ * the scissors, the line length and video memory.
+ */
+static bool s3_fast_dst(S3TrioState *s, uint16_t mix, int xl, int yt,
+                        int w, int h)
+{
+    S3GE *ge = &s->ge;
+    unsigned bpp = s3_ge_bpp(s);
+    uint32_t all = bpp == 4 ? UINT32_MAX : (1u << (bpp * 8)) - 1;
+    int xr = xl + w - 1, yb = yt + h - 1;
+
+    return (ge->cmd & CMD_DRAW) && (mix & 0xf) == 0x7 &&
+           s3_pix_sel(s) != 3 && !(ge->mf[0xe] & 0x120) &&
+           (ge->wrt_mask & all) == all &&
+           xl >= (ge->mf[2] & 0xfff) && xr <= (ge->mf[4] & 0xfff) &&
+           yt >= (ge->mf[1] & 0xfff) && yb <= (ge->mf[3] & 0xfff) &&
+           xl >= 0 && xr < s3_ge_pitch(s) && yt >= 0 && yb <= 0xfff &&
+           s3_px_addr(s, s3_base(s, false), xr, yb) + bpp <=
+           s->vga.vram_size;
+}
+
+static void s3_fast_dirty(S3TrioState *s, uint32_t base, int xl, int yt,
+                          int w, int h)
+{
+    S3GE *ge = &s->ge;
+
+    ge->dirty_lo = MIN(ge->dirty_lo, s3_px_addr(s, base, xl, yt));
+    ge->dirty_hi = MAX(ge->dirty_hi, s3_px_addr(s, base, xl + w - 1,
+                                                yt + h - 1) + s3_ge_bpp(s));
+}
+
+/* a rectangle of the foreground or background color */
+static bool s3_rect_fast(S3TrioState *s)
+{
+    S3GE *ge = &s->ge;
+    unsigned bpp = s3_ge_bpp(s);
+    int xs = (ge->cmd & CMD_XPOS) ? 1 : -1, ys = (ge->cmd & CMD_YPOS) ? 1 : -1;
+    int xl = xs > 0 ? ge->x : ge->x - ge->w + 1;
+    int yt = ys > 0 ? ge->y : ge->y - ge->h + 1;
+    uint32_t base = s3_base(s, false), color;
+    uint8_t *p;
+
+    if ((ge->frgd_mix & 0x60) >= 0x40 ||
+        !s3_fast_dst(s, ge->frgd_mix, xl, yt, ge->w, ge->h)) {
+        return false;
+    }
+    color = (ge->frgd_mix & 0x60) ? ge->frgd_color : ge->bkgd_color;
+    for (int y = yt; y < yt + ge->h; y++) {
+        p = s->vga.vram_ptr + s3_px_addr(s, base, xl, y);
+        if (bpp == 1) {
+            memset(p, color, ge->w);
+            continue;
+        }
+        for (int i = 0; i < ge->w; i++) {
+            if (bpp == 2) {
+                stw_le_p(p + i * 2, color);
+            } else {
+                stl_le_p(p + i * 4, color);
+            }
+        }
+    }
+    s3_fast_dirty(s, base, xl, yt, ge->w, ge->h);
+    /* where the walk stops */
+    ge->x = ge->cur_x & 0xfff;
+    ge->sx = ge->w;
+    ge->y += ys * ge->h;
+    ge->sy = 0;
+    ge->cur_y = ge->y & 0xfff;
+    s3_ge_done(s);
+    return true;
+}
+
+/* a copy from video memory */
+static bool s3_blit_fast(S3TrioState *s, int w, int h, int sx0, int sy0,
+                         int dx, int dy, int xs, int ys)
+{
+    S3GE *ge = &s->ge;
+    unsigned bpp = s3_ge_bpp(s);
+    uint32_t sbase = s3_base(s, true), dbase = s3_base(s, false);
+    int sxl = xs > 0 ? sx0 : sx0 - w + 1, dxl = xs > 0 ? dx : dx - w + 1;
+    int syt = ys > 0 ? sy0 : sy0 - h + 1, dyt = ys > 0 ? dy : dy - h + 1;
+    int64_t delta;
+    uint8_t *v = s->vga.vram_ptr;
+
+    if ((ge->frgd_mix & 0x60) != 0x60 ||
+        !s3_fast_dst(s, ge->frgd_mix, dxl, dyt, w, h) ||
+        sxl < 0 || sxl + w - 1 >= s3_ge_pitch(s) ||
+        syt < 0 || syt + h - 1 > 0xfff ||
+        s3_px_addr(s, sbase, sxl + w - 1, syt + h - 1) + bpp >
+        s->vga.vram_size) {
+        return false;
+    }
+    /*
+     * The source and destination lines are the same distance apart on
+     * every line. Where a line overlaps its own source, the walk gives
+     * what memmove gives only when it goes away from the source.
+     */
+    delta = (int64_t)s3_px_addr(s, sbase, sxl, sy0) -
+            s3_px_addr(s, dbase, dxl, dy);
+    if ((delta < 0 ? -delta : delta) < (int64_t)w * bpp &&
+        (xs > 0 ? delta < 0 : delta > 0)) {
+        return false;
+    }
+    for (int j = 0; j < h; j++) {
+        memmove(v + s3_px_addr(s, dbase, dxl, dy + j * ys),
+                v + s3_px_addr(s, sbase, sxl, sy0 + j * ys), w * bpp);
+    }
+    s3_fast_dirty(s, dbase, dxl, dyt, w, h);
+    return true;
+}
+
 static void s3_rect_start(S3TrioState *s)
 {
     S3GE *ge = &s->ge;
@@ -407,6 +521,9 @@ static void s3_rect_start(S3TrioState *s)
     if (ge->cmd & CMD_WAIT) {
         ge->wait = true;
         ge->pend_bytes = 0;
+        return;
+    }
+    if (s3_rect_fast(s)) {
         return;
     }
     while (ge->sy) {
@@ -423,8 +540,9 @@ static void s3_blit(S3TrioState *s, bool pattern)
     int dx = ge->destx & 0xfff, dy = ge->desty & 0xfff;
     int xs = (ge->cmd & CMD_XPOS) ? 1 : -1, ys = (ge->cmd & CMD_YPOS) ? 1 : -1;
     uint32_t sbase = s3_base(s, true);
+    bool fast = !pattern && s3_blit_fast(s, w, h, sx0, sy0, dx, dy, xs, ys);
 
-    for (int j = 0; j < h; j++) {
+    for (int j = 0; j < h && !fast; j++) {
         for (int i = 0; i < w; i++) {
             int x = dx + i * xs, y = dy + j * ys;
             int px = pattern ? sx0 + (x & 7) : sx0 + i * xs;
