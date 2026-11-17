@@ -5,7 +5,8 @@
 # usage: pack.sh nt351|aix13|aix13tcf|dellunix VMDIR BINDIR OUT.tar.lz
 #   VMDIR   holds disk/DISK.qcow2 for each disk of the guest (GUEST.qcow2;
 #           aix13tcf: site1.qcow2 and site2.qcow2) and fw/928-n9.bin, for
-#           nt351 also fw/bios-nt351.bin (dellunix: no fw); it is only read
+#           nt351 also fw/bios-nt351.bin (dellunix: fw/s3t64vp.bin only, the
+#           S3 Trio64V+ video BIOS); it is only read
 #   BINDIR  STAGE/i386 of ../../release/stage.sh
 # nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3),
 # aix13tcf makes aix13ps2-tcf-lemu (two AIX PS/2 1.3 VMs as a TCF cluster),
@@ -21,7 +22,7 @@ case $g in
 nt351) k=nt351x86-lemu disks=nt351 fw="bios-nt351.bin 928-n9.bin" roms= ;;
 aix13) k=aix13ps2-lemu disks=aix13 fw=928-n9.bin roms=bios-256k.bin ;;
 aix13tcf) k=aix13ps2-tcf-lemu disks="site1 site2" fw=928-n9.bin roms=bios-256k.bin ;;
-dellunix) k=dellunix22-lemu disks=dellunix fw= roms="bios-256k.bin vgabios-cirrus.bin" ;;
+dellunix) k=dellunix22-lemu disks=dellunix fw=s3t64vp.bin roms=bios-256k.bin ;;
 *) echo "$0: no guest $g" >&2; exit 1 ;;
 esac
 [ -f "$here/../$g/run.sh" ] || { echo "$0: no guest $g in $here/.." >&2; exit 1; }
