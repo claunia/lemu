@@ -20,6 +20,8 @@ case $out in
 *.tar.lz) name=$(basename "$out" .tar.lz) pack="plzip -9" check="lzip -t" ;;
 *) echo "OUT must end in .tar.gz or .tar.lz" >&2; exit 1 ;;
 esac
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$name

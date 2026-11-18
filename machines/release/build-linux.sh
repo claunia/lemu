@@ -25,7 +25,7 @@ dnf -y -q install gcc-toolset-13-gcc gcc-toolset-13-binutils make ninja-build \
     diffutils findutils patchelf bzip2 tar
 . /opt/rh/gcc-toolset-13/enable
 mkdir -p /b/build
-tar -C /src --exclude=./.git --exclude='./build*' -cf - . | tar -C /b -xf -
+tar -C /src --exclude=./.git --exclude='./build*' --exclude=.env -cf - . | tar -C /b -xf -
 cd /b/build
 # the source is copied without .git, so pass the git id for --version
 ../configure ${PKGVERSION:+--with-pkgversion=$PKGVERSION} --python=/usr/bin/python3.12 \

@@ -26,6 +26,8 @@ hpux1100) name=hpux1100b160l-lemu img=$vm/hpux1100.qcow2 ;;
 hpux11v1) name=hpux11v1b160l-lemu img=$vm/hpux.img ;;
 *) echo "unknown OS: $os" >&2; exit 1 ;;
 esac
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$name

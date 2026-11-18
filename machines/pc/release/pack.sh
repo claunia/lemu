@@ -35,6 +35,8 @@ for p in $plats; do
     [ -d "$bin/$p" ] || { echo "$0: no $bin/$p" >&2; exit 1; }
 done
 out=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$k

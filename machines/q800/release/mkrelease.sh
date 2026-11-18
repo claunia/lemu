@@ -29,6 +29,8 @@ case $4 in
 *) echo "OUT must end in .tar.lz" >&2; exit 1 ;;
 esac
 out=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$name

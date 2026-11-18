@@ -43,6 +43,30 @@ commit.
 - `build-mac.sh` prints the oldest macOS the binaries run on
   (`needs macOS ...`). The kit READMEs must say the same.
 
+## Sign (macOS)
+
+`build-mac.sh` signs the binaries and libraries in `OUT/macos-arm64` with
+the Developer ID and has Apple notarize them (`sign-mac.sh`), so macOS
+runs a downloaded kit without asking. It needs the network, and Apple
+takes a few minutes.
+
+- The identity is in `.env` in this folder: copy `.env.example` and fill
+  it in. Git ignores `.env`, and the Linux and Windows builds leave it
+  out of their copy of the tree. The key and the notary password stay in
+  the keychain.
+- `OUT/mac.log` must show `notarize: Accepted` and `check mac: OK`.
+- The pack scripts run `sign-mac.sh -c` on the macOS binaries first, and
+  stop if they are not signed and notarized.
+- To sign binaries from an older build or an unpacked kit (no rebuild):
+  `sh sign-mac.sh DIR`, where DIR is `OUT/macos-arm64` or the kit's
+  `bin/macos-arm64` (the MIPS kits: `qemu/macos-arm64`). Then pack.
+- `SIGN=adhoc` signs ad hoc, as before, for a build that never goes into
+  a kit. The pack scripts refuse those binaries.
+- A downloaded kit's binaries cannot carry their ticket (only apps,
+  disk images and installers can), so the first start looks it up online.
+  Offline, macOS may still block them: the kit READMEs keep the
+  `xattr -cr .` hint.
+
 ## Feature check
 
 `features.sh`, the same as in `rm200/release` and `jensen/release`, lists

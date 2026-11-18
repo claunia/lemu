@@ -28,14 +28,13 @@ while [ -n "$todo" ]; do
 done
 # sdl2-compat loads SDL3 at run time from its own directory
 install -m 644 "$(brew --prefix sdl3)/lib/libSDL3.0.dylib" lib/libSDL3.dylib
-for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; codesign -f -s - $l 2>/dev/null; done
-for b in qemu-system-mips64el qemu-system-mips64; do
-  codesign -f -s - --entitlements $SRC/accel/hvf/entitlements.plist $b 2>/dev/null
-done
+for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; done
 if otool -L qemu-system-mips64el qemu-system-mips64 lib/*.dylib | grep -q '/opt/homebrew'; then
   echo "MISSING: a Homebrew library is still linked from /opt/homebrew"
   exit 1
 fi
+# Developer ID and notarization, as for the shared build
+sh $R/../../release/sign-mac.sh $O
 for b in qemu-system-mips64el qemu-system-mips64; do
   sh $R/features.sh $O/$b > $OUT/macos-$b.features
   sh $R/check.sh macos $b $OUT/macos-$b.features

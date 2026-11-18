@@ -27,4 +27,5 @@ for f in qemu-system-ppc lib/*; do
         install_name_tool -delete_rpath @executable_path/lib/ "$f"
     done
 done
-codesign -f -s - lib/*.dylib qemu-system-ppc
+# Developer ID and notarization, as for the shared build
+sh "$src/machines/release/sign-mac.sh" "$out"

@@ -16,7 +16,7 @@ fi
 exec 2>/out/windows-x64-err.log; set -x
 dnf install -y -q gcc mingw64-gcc mingw64-glib2 mingw64-pixman mingw64-SDL2 mingw64-zlib \
   python3 ninja-build git bzip2 flex bison diffutils findutils make tar >/dev/null
-mkdir /build && tar -C /src --exclude=./.git --exclude='./build*' -cf - . | tar -C /build -xf -
+mkdir /build && tar -C /src --exclude=./.git --exclude='./build*' --exclude=.env -cf - . | tar -C /build -xf -
 mkdir /build/b && cd /build/b
 # the source is copied without .git, so pass the git id for --version
 ../configure ${PKGVERSION:+--with-pkgversion=$PKGVERSION} --cross-prefix=x86_64-w64-mingw32- \

@@ -28,12 +28,13 @@ while [ -n "$todo" ]; do
     install_name_tool -change $d @executable_path/lib/$n "$f" 2>/dev/null
   done
 done
-for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; codesign -f -s - $l 2>/dev/null; done
-codesign -f -s - --entitlements $SRC/accel/hvf/entitlements.plist $b 2>/dev/null
+for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; done
 if otool -L $b lib/*.dylib | grep -q '/opt/homebrew'; then
   echo "MISSING: a Homebrew library is still linked from /opt/homebrew"
   exit 1
 fi
+# Developer ID and notarization, as for the shared build
+sh $R/../../release/sign-mac.sh $O
 # the newest macOS any of the files needs; README.txt says which macOS the kit runs on
 for f in $b lib/*.dylib; do
   otool -l $f | awk '/LC_BUILD_VERSION/ {v=1} v && $1 == "minos" {print $2; exit}'

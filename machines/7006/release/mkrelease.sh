@@ -4,6 +4,8 @@ set -e
 [ $# -eq 3 ] || { echo "usage: $0 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 vm=$1 bin=$2 out=$3
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/aix325rs6000-lemu

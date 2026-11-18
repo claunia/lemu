@@ -15,7 +15,7 @@ dnf -y -q install gcc mingw64-gcc mingw64-glib2 mingw64-pixman \
     mingw64-sdl2-compat mingw64-SDL3 mingw64-pkg-config make ninja-build \
     python3 git bzip2 diffutils findutils tar
 mkdir -p /work/build
-tar -C /src --exclude=./.git --exclude='./build*' -cf - . | tar -C /work -xf -
+tar -C /src --exclude=./.git --exclude='./build*' --exclude=.env -cf - . | tar -C /work -xf -
 cd /work/build
 # the source is copied without .git, so pass the git id for --version
 ../configure ${PKGVERSION:+--with-pkgversion=$PKGVERSION} \

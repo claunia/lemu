@@ -35,6 +35,8 @@ esac
 src=$(cd "$(dirname "$0")/../.." && pwd)/$g
 bin=$2
 rel=$(cd "$3" && pwd)
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$(dirname "$0")/../../release/sign-mac.sh" -c "$rel/macos-arm64"
 out=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
 q=$kit/qemu
 rm -rf "$q"

@@ -1,0 +1,2 @@
+# the signing identity of sign-mac.sh; see .env.example
+.env

@@ -1,7 +1,8 @@
 #!/bin/sh
 # One macOS arm64 build of every kit binary: SDL (the default display) and
 # Cocoa, Core Audio, vmnet. Bundles the Homebrew dylibs into
-# OUT/macos-arm64/lib and lists each binary's features.
+# OUT/macos-arm64/lib, signs it all with the Developer ID and has Apple
+# notarize it (sign-mac.sh), and lists each binary's features.
 # Feature set = everything the 40p, 7006, pseries, jensen and rm200 builds had;
 # qemu-system-hppa (HP B160L), qemu-system-i386 (PC), qemu-system-sparc
 # (SPARCstation 5) and qemu-system-m68k (Quadra 800) get the same.
@@ -34,14 +35,13 @@ while [ -n "$todo" ]; do
 done
 # sdl2-compat loads SDL3 at run time from its own directory
 install -m 644 "$(brew --prefix sdl3)/lib/libSDL3.0.dylib" lib/libSDL3.dylib
-for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; codesign -f -s - $l 2>/dev/null; done
-for b in $BINS; do
-  codesign -f -s - --entitlements $SRC/accel/hvf/entitlements.plist $b 2>/dev/null
-done
+for l in lib/*; do install_name_tool -id @executable_path/$l $l 2>/dev/null; done
 if otool -L $BINS lib/*.dylib | grep -q '/opt/homebrew'; then
   echo "MISSING: a Homebrew library is still linked from /opt/homebrew"
   exit 1
 fi
+# so that macOS runs the kits without asking; SIGN=adhoc for builds that never go into a kit
+sh $R/sign-mac.sh $O
 # the newest macOS any of the files needs; README.txt says which macOS the kit runs on
 for f in $BINS lib/*.dylib; do
   otool -l $f | awk '/LC_BUILD_VERSION/ {v=1} v && $1 == "minos" {print $2; exit}'

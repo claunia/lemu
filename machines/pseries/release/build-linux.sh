@@ -18,7 +18,7 @@ dnf -y -q install gcc-toolset-13-gcc gcc-toolset-13-binutils make ninja-build \
     diffutils findutils patchelf bzip2 tar
 . /opt/rh/gcc-toolset-13/enable
 mkdir -p /work/build
-tar -C /src --exclude=./.git --exclude='./build*' -cf - . | tar -C /work -xf -
+tar -C /src --exclude=./.git --exclude='./build*' --exclude=.env -cf - . | tar -C /work -xf -
 cd /work/build
 # the source is copied without .git, so pass the git id for --version
 ../configure ${PKGVERSION:+--with-pkgversion=$PKGVERSION} \

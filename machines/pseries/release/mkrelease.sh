@@ -11,6 +11,8 @@ aix71) name=aix71pseries-lemu img=$vm/aix71.qcow2 ;;
 aix72) name=aix72pseries-lemu img=$vm/hdisk0.qcow2 ;;
 *) echo "unknown OS: $os" >&2; exit 1 ;;
 esac
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$name

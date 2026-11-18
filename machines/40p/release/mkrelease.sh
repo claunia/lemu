@@ -21,6 +21,8 @@ aix41) img=$vm/aix415.qcow2 fw=$vm ;;
 aix43) img=$vm/aix433-gfx.qcow2 fw=$vm ;;
 aix51) img=$vm/aix51.qcow2 fw=$vm/media ;;
 esac
+# the macOS binaries must be signed with the Developer ID and notarized
+sh "$here/../../release/sign-mac.sh" -c "$bin/macos-arm64"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 r=$t/$name
