@@ -11,7 +11,6 @@ Web: /usr/local/bin/mosaic & in the xterm. Mosaic 2.5 (1994) speaks plain HTTP o
 Network: a Western Digital WD8003E ISA card, set as Dell's driver wants it (I/O 0x280, IRQ 5, memory 0xD0000). QEMU user mode NAT; Dell UNIX keeps its address 192.168.1.111 (host name amnesia) with gateway and DNS 192.168.1.1, and this computer is 192.168.1.10. telnet localhost 22023 reaches Dell UNIX; the port listens on this computer only.
 The clock is the host's local time; Dell UNIX shows 2026 fine.
 Mouse: a Microsoft serial mouse on COM1. QEMU grabs it when you click in the window; Ctrl-Alt-G lets it go. When X starts, the pointer jumps by about 400 pixels: move the mouse.
-Seldom, after a boot, the login box takes no keys. Then telnet localhost 22023 as root and type /etc/init.d/xdm stop; /etc/init.d/xdm start
 QEMU halts the CPU while Dell UNIX is idle, so an idle VM uses about 1% of a host core.
 Shut down with Shutdown > Powerdown in Dell's menu, or shutdown -y -g0 -i0 as root, and wait for "Press any key to reboot" before quitting QEMU. To restart, use Shutdown > Reboot or shutdown -y -g0 -i6, not reboot: that is BSD's reboot, which skips the shutdown scripts.
 macOS: if the binary is blocked, run xattr -cr . in this folder.
