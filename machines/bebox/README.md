@@ -59,10 +59,19 @@ A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
 
 `r4/` has the `run.sh`, `run.cmd` and `README.txt` of a ready-to-run kit.
 
+## Sound
+
+The CS4231A plays through QEMU's default audio backend, or the one named
+with `-M bebox,audiodev=ID`. BeOS's driver plays on DMA 6 and records on
+DMA 7; QEMU's codec only plays, so there is no recording.
+
 ## Known problems
 
 - BeOS's own Restart and the installer's Quit go back to the boot
   loader without resetting the machine, and the keyboard is dead there:
   reset the VM (`system_reset` in the monitor) instead.
+- Sound has short dropouts now and then: the guest's mixer is late
+  with a buffer, as both CPUs share one host thread and BeOS's idle
+  loop never halts them.
 - With `-smp 1` the BeOS kernel does not get going; the BeBox always
   has two CPUs.

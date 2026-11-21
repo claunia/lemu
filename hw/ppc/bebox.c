@@ -405,11 +405,15 @@ static void bebox_init(MachineState *machine)
     /* GeekPort, A/D and D/A, front-panel LEDs */
     isa_create_simple(isa_bus, TYPE_BEBOX_IO);
 
-    /* Sound */
+    /*
+     * Sound: Be's driver plays on DMA 6 and records on DMA 7, both set to
+     * 8-bit transfers in the 82378's extended mode register. QEMU's codec
+     * only plays.
+     */
     isa_dev = isa_new("cs4231a");
     qdev_prop_set_uint32(DEVICE(isa_dev), "iobase", 0x830);
     qdev_prop_set_uint32(DEVICE(isa_dev), "irq", BEBOX_SOUND_ISA_IRQ);
-    qdev_prop_set_uint32(DEVICE(isa_dev), "dma", 7);
+    qdev_prop_set_uint32(DEVICE(isa_dev), "dma", 6);
     if (machine->audiodev) {
         qdev_prop_set_string(DEVICE(isa_dev), "audiodev", machine->audiodev);
     }
