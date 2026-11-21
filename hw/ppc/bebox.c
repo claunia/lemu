@@ -453,8 +453,19 @@ static void bebox_machine_instance_init(Object *obj)
 
 static void bebox_machine_class_init(ObjectClass *oc, const void *data)
 {
+    /*
+     * The boot ROM waits to see the 8042 take each byte it writes (IBF
+     * set, then clear), and reads the command byte with its keyboard
+     * interrupt handler installed: the controller must come out of reset
+     * with its interrupts off, or the handler takes the reply.
+     */
+    static GlobalProperty compat[] = {
+        { "i8042", "ibf-read", "on" },
+        { "i8042", "reset-mode", "0" },
+    };
     MachineClass *mc = MACHINE_CLASS(oc);
 
+    compat_props_add(mc->compat_props, compat, G_N_ELEMENTS(compat));
     mc->desc = "Be Inc. BeBox (dual PowerPC 603)";
     mc->init = bebox_init;
     mc->reset = bebox_machine_reset;
