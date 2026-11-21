@@ -472,6 +472,8 @@ static void bebox_machine_class_init(ObjectClass *oc, const void *data)
     static GlobalProperty compat[] = {
         { "i8042", "ibf-read", "on" },
         { "i8042", "reset-mode", "0" },
+        /* the IDE drive's DMA request and acknowledge go to channel 5 */
+        { "isa-ide", "dma", "5" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
 

@@ -23,6 +23,11 @@ the 512 KiB Am29F040 that Be's flash driver also takes:
     tools/bfs.py beos-r4.iso@160186s get /beos/etc/bebox_bootmain.image main.image
     tools/mkflash.py bootnub.rom main.image flash-r4.bin
 
+BeOS R3 carries its own (377 KiB), also for the 512 KiB chip:
+
+    tools/bfs.py beos-r3.iso@32856s get /beos/etc/bebox_bootmain.image main.image
+    tools/mkflash.py bootnub.rom main.image flash-r3.bin
+
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
 
@@ -38,7 +43,9 @@ from the table of contents. `tools/bin2iso.py` turns a MODE1/2352 `.cue` and
     -drive if=none,id=cd0,media=cdrom,readonly=on,format=raw,file=beos-r4.iso
     -device scsi-cd,drive=cd0,scsi-id=3,tracks=0:3402:160186
 
-The R3 PowerPC CD has one track: give it without `tracks`.
+The R3 PowerPC CD has one track: give it without `tracks`. Its BFS
+volume starts at 2048-byte sector 32856, for `tools/bfs.py`. The boot ROM
+also boots CDs on IDE (`ide-cd`, `bus=ide.0,unit=1`).
 
 `tools/bfs.py` lists and copies files from a BFS volume, read-only.
 
@@ -47,15 +54,19 @@ The R3 PowerPC CD has one track: give it without `tracks`.
 The kernel debugger and the boot ROM's debug output use serial 4, the
 fourth `-serial`, at 19200 baud.
 
-## Installing BeOS R4
+## Installing BeOS
 
-Boot the R4 CD with a blank disk (1 GiB is plenty), agree to the
+Boot the R3 or R4 CD with a blank disk (1 GiB is plenty), agree to the
 licence, pick the disk, let the installer initialize it and click Begin.
 A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
 
     -drive if=none,id=hd0,format=qcow2,file=beos.qcow2
     -device scsi-hd,drive=hd0,scsi-id=0          # SCSI
     -device ide-hd,drive=hd0,bus=ide.0,unit=0    # or IDE
+
+BeOS reads and writes the IDE disk with DMA: the drive's DMA request is
+wired to ISA DMA channel 5, and the 82378 moves the data with its
+scatter-gather lists.
 
 `r4/` has the `run.sh`, `run.cmd` and `README.txt` of a ready-to-run kit.
 
