@@ -2,6 +2,7 @@
  * QEMU 8259 interrupt controller emulation
  *
  * Copyright (c) 2003-2004 Fabrice Bellard
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -212,6 +213,17 @@ int pic_read_irq(I8259PICState *s)
             }
             intno = scs->irq_base + irq2;
             i8259_intack(pcs, irq);
+            /*
+             * The slave's INT drops during the acknowledge and rises again
+             * if it still has a request to make, so the master sees a new
+             * edge on IRQ2. Without it, a slave in auto-EOI mode with two
+             * requests pending keeps INT high and the second is never
+             * delivered.
+             */
+            if (i8259_get_irq(scs) >= 0) {
+                qemu_irq_lower(scs->int_out[0]);
+                qemu_irq_raise(scs->int_out[0]);
+            }
             irq = irq2 + 8;
         } else {
             intno = pcs->irq_base + irq;
