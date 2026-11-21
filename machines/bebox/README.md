@@ -59,6 +59,18 @@ A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
 
 `r4/` has the `run.sh`, `run.cmd` and `README.txt` of a ready-to-run kit.
 
+## Network
+
+The BeBox has no network port: use a PCI card in a free slot. BeOS R4
+and later take QEMU's `ne2k_pci`. BeOS R3 and earlier have no PCI NE2000
+driver, but their `tulip` driver takes a DEC 21041, `tulip-21041`:
+
+    -nic none -netdev user,id=n0 -device tulip-21041,netdev=n0,addr=0e
+
+Give BeOS a static address (10.0.2.15, mask 255.255.255.0, gateway
+10.0.2.2, DNS 10.0.2.3 with `-netdev user`). Its DHCP client sends no
+DHCP requests here with either card, only ARP requests for 0.0.128.0.
+
 ## Sound
 
 The CS4231A plays through QEMU's default audio backend, or the one named
