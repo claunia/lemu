@@ -4,7 +4,7 @@ Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWa
 BeOS boots from an IDE disk. flash.bin is the BeBox boot flash with the boot ROM of the BeOS R4.5 CD; BeOS can rewrite it.
 The QEMU monitor is in the terminal: change cd0 file.iso puts a CD in the IDE CD-ROM drive.
 Network is QEMU user mode NAT on a DEC 21041 in slot 2. In Network preferences add "DEC 21040/21041 based adapter (PCI)" with IP 10.0.2.15, mask 255.255.255.0, router 10.0.2.2 and DNS 10.0.2.3.
-At every boot the media server says its settings file is damaged and hangs on that alert: sound does not work yet; the rest of the desktop does.
+At every boot the media server says its settings file is damaged; hold the mouse button a moment on OK to close the alert. Sound does not play yet.
 The kernel debugger talks on serial 4, the "serial3" window of the View menu.
 macOS: if the binary is blocked, run xattr -cr . in this folder.
 
