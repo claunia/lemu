@@ -31,7 +31,8 @@ chip; mkflash drops the "BOOT" tag in front of R4.5's:
 
 BeOS R5 brings no boot ROM; R4.5's boots it. Preview Release 2 carries
 its own (368 KiB, October 1997) in the BFS volume of its CD, see below.
-The first Preview Release brings none; PR2's boots it.
+The first Preview Release brings none; PR2's boots it. Developer
+Release 8 boots with ROM 1.1d7 (bootnub.rom and bootmain.rom).
 
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
@@ -101,10 +102,16 @@ Initialize the disk with the PR2 CD's DriveSetup first; the Preview
 Release installer then offers to initialize it again, with its own
 format, and installs. It shows the same date in 1901.
 
-`pr/`, `pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`,
-`run.cmd` and `README.txt` of ready-to-run kits: R3, R4.5 and R5 on IDE
-with a DEC 21041, R4 on SCSI with an NE2000, the Preview Release and
-Preview Release 2 on SCSI with a DEC 21041.
+Developer Release 8 is on an old Be file system volume that
+`tools/bfs.py` does not read (Aaru extracts it). Its installer
+initializes the disk itself: pick Initialize in the left pop-up menu and
+the SCSI disk in the other, click Begin, then switch back to Install
+From and install onto NewDisk.
+
+`dr8/`, `pr/`, `pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the
+`run.sh`, `run.cmd` and `README.txt` of ready-to-run kits: R3, R4.5 and
+R5 on IDE with a DEC 21041, R4 on SCSI with an NE2000, DR8, the Preview
+Release and Preview Release 2 on SCSI with a DEC 21041.
 
 ## Network
 
