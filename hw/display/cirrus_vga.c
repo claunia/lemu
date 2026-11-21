@@ -249,6 +249,17 @@ static bool blit_is_unsafe(struct CirrusVGAState *s, bool dst_only)
     if (dst_only) {
         return false;
     }
+    /*
+     * Color expansion reads its source as packed bits, a whole number of
+     * bytes per line, whatever the source pitch: drivers leave it at 0.
+     */
+    if (s->cirrus_blt_mode & CIRRUS_BLTMODE_COLOREXPAND) {
+        int64_t bits = (s->vga.gr[0x2f] & 0x07) +
+                       s->cirrus_blt_width / s->cirrus_blt_pixelwidth;
+
+        return s->cirrus_blt_srcaddr +
+               (bits + 7) / 8 * s->cirrus_blt_height > s->vga.vram_size;
+    }
     if (blit_region_is_unsafe(s, s->cirrus_blt_srcpitch,
                               s->cirrus_blt_srcaddr)) {
         return true;
