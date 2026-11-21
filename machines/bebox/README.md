@@ -64,11 +64,15 @@ A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
     -device scsi-hd,drive=hd0,scsi-id=0          # SCSI
     -device ide-hd,drive=hd0,bus=ide.0,unit=0    # or IDE
 
+R3 mounts a CD put in after boot with `mountvolume -r -all` in a
+Terminal.
+
 BeOS reads and writes the IDE disk with DMA: the drive's DMA request is
 wired to ISA DMA channel 5, and the 82378 moves the data with its
 scatter-gather lists.
 
-`r4/` has the `run.sh`, `run.cmd` and `README.txt` of a ready-to-run kit.
+`r3/` and `r4/` have the `run.sh`, `run.cmd` and `README.txt` of
+ready-to-run kits: R3 on IDE with a DEC 21041, R4 on SCSI with an NE2000.
 
 ## Network
 
