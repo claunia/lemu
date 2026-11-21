@@ -122,12 +122,25 @@ static uint32_t i8257_read_pageh(void *opaque, uint32_t nport)
     return d->regs[ichan].pageh;
 }
 
+/*
+ * How far a channel's address and count registers are shifted: by words
+ * (1) or by bytes (0). The EISA extended mode register picks it per
+ * channel; without it each controller has its own fixed width.
+ */
+static int i8257_chan_shift(I8257State *d, int ichan)
+{
+    if (d->pageh_base < 0) {
+        return d->dshift;
+    }
+    return ((d->ext_mode[ichan] >> 2) & 3) == 1;
+}
+
 static inline void i8257_init_chan(I8257State *d, int ichan)
 {
     I8257Regs *r;
 
     r = d->regs + ichan;
-    r->now[ADDR] = r->base[ADDR] << d->dshift;
+    r->now[ADDR] = r->base[ADDR] << i8257_chan_shift(d, ichan);
     r->now[COUNT] = 0;
 }
 
@@ -143,23 +156,24 @@ static inline int i8257_getff(I8257State *d)
 static uint64_t i8257_read_chan(void *opaque, hwaddr nport, unsigned size)
 {
     I8257State *d = opaque;
-    int ichan, nreg, iport, ff, val, dir;
+    int ichan, nreg, iport, ff, val, dir, shift;
     I8257Regs *r;
 
     iport = (nport >> d->dshift) & 0x0f;
     ichan = iport >> 1;
     nreg = iport & 1;
     r = d->regs + ichan;
+    shift = i8257_chan_shift(d, ichan);
 
     dir = ((r->mode >> 5) & 1) ? -1 : 1;
     ff = i8257_getff(d);
     if (nreg)
-        val = (r->base[COUNT] << d->dshift) - r->now[COUNT];
+        val = (r->base[COUNT] << shift) - r->now[COUNT];
     else
         val = r->now[ADDR] + r->now[COUNT] * dir;
 
     ldebug ("read_chan %#x -> %d\n", iport, val);
-    return (val >> (d->dshift + (ff << 3))) & 0xff;
+    return (val >> (shift + (ff << 3))) & 0xff;
 }
 
 static void i8257_write_chan(void *opaque, hwaddr nport, uint64_t data,
@@ -330,6 +344,7 @@ static void i8257_dma_release_DREQ(IsaDma *obj, int nchan)
 static void i8257_channel_run(I8257State *d, int ichan)
 {
     int ncont = d->dshift;
+    int shift = i8257_chan_shift(d, ichan);
     int n;
     I8257Regs *r = &d->regs[ichan];
 #ifdef DEBUG_DMA
@@ -347,10 +362,10 @@ static void i8257_channel_run(I8257State *d, int ichan)
 #endif
 
     n = r->transfer_handler (r->opaque, ichan + (ncont << 2),
-                             r->now[COUNT], (r->base[COUNT] + 1) << ncont);
+                             r->now[COUNT], (r->base[COUNT] + 1) << shift);
     r->now[COUNT] = n;
-    ldebug ("dma_pos %d size %d\n", n, (r->base[COUNT] + 1) << ncont);
-    if (n == (r->base[COUNT] + 1) << ncont) {
+    ldebug ("dma_pos %d size %d\n", n, (r->base[COUNT] + 1) << shift);
+    if (n == (r->base[COUNT] + 1) << shift) {
         ldebug("transfer done\n");
         d->status |= (1 << ichan);
     }
@@ -491,7 +506,13 @@ static void i8257_dma_schedule(IsaDma *obj)
 static void i8257_reset(DeviceState *dev)
 {
     I8257State *d = I8257(dev);
+    int i;
+
     i8257_write_cont(d, (0x05 << d->dshift), 0, 1);
+    /* channels 0-3 move bytes, channels 5-7 words */
+    for (i = 0; i < 4; i++) {
+        d->ext_mode[i] = (d->dshift ? 0x04 : 0x00) | i;
+    }
 }
 
 static int i8257_phony_handler(void *opaque, int nchan, int dma_pos,
@@ -560,6 +581,38 @@ static void i8257_write_stop(void *opaque, hwaddr nport, uint64_t data,
     }
     d->stop[nport >> 2][nport & 3] = (nport & 3) ? data : data & 0xfc;
 }
+
+/*
+ * EISA extended mode register (0x40b, 0x4d6): bits 1:0 pick the
+ * channel, bits 3:2 its width (00 8-bit by bytes, 01 16-bit by words,
+ * 10 32-bit by bytes, 11 16-bit by bytes). Timing, EOP and stop bits
+ * are kept but change nothing here. It is write-only.
+ */
+static uint64_t i8257_read_ext_mode(void *opaque, hwaddr nport,
+                                    unsigned size)
+{
+    return 0;
+}
+
+static void i8257_write_ext_mode(void *opaque, hwaddr nport, uint64_t data,
+                                 unsigned size)
+{
+    I8257State *d = opaque;
+    int ichan = data & 3;
+
+    d->ext_mode[ichan] = data;
+    i8257_init_chan(d, ichan);
+}
+
+static const MemoryRegionOps ext_mode_io_ops = {
+    .read = i8257_read_ext_mode,
+    .write = i8257_write_ext_mode,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 1,
+    },
+};
 
 static const MemoryRegionOps stop_io_ops = {
     .read = i8257_read_stop,
@@ -638,6 +691,17 @@ static const VMStateDescription vmstate_i8257_eisa = {
     }
 };
 
+static const VMStateDescription vmstate_i8257_ext_mode = {
+    .name = "dma/ext-mode",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = i8257_eisa_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT8_ARRAY(ext_mode, I8257State, 4),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_i8257 = {
     .name = "dma",
     .version_id = 1,
@@ -654,6 +718,7 @@ static const VMStateDescription vmstate_i8257 = {
     },
     .subsections = (const VMStateDescription * const []) {
         &vmstate_i8257_eisa,
+        &vmstate_i8257_ext_mode,
         NULL
     }
 };
@@ -684,6 +749,11 @@ static void i8257_realize(DeviceState *dev, Error **errp)
                               "dma-stop", 16);
         memory_region_add_subregion(isa_address_space_io(isa),
                                     0x4e0 + (d->dshift << 4), &d->stop_io);
+        memory_region_init_io(&d->ext_mode_io, OBJECT(dev), &ext_mode_io_ops,
+                              d, "dma-ext-mode", 1);
+        memory_region_add_subregion(isa_address_space_io(isa),
+                                    d->dshift ? 0x4d6 : 0x40b,
+                                    &d->ext_mode_io);
     }
 
     memory_region_init_io(&d->cont_io, OBJECT(isa), &cont_io_ops, d,

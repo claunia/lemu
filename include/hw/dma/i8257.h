@@ -37,10 +37,12 @@ struct I8257State {
     I8257Regs regs[4];
     uint8_t counth[4];
     uint8_t stop[4][3];
+    uint8_t ext_mode[4];
     MemoryRegion channel_io;
     MemoryRegion cont_io;
     MemoryRegion counth_io;
     MemoryRegion stop_io;
+    MemoryRegion ext_mode_io;
 
     QEMUBH *dma_bh;
     bool dma_bh_scheduled;
