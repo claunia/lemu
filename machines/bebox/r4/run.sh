@@ -18,5 +18,6 @@ exec "$q" \
  -device scsi-hd,drive=hd0,scsi-id=0 \
  -drive if=none,id=cd0,media=cdrom,readonly=on \
  -device scsi-cd,drive=cd0,scsi-id=3 \
+ -nic none -netdev user,id=n0 -device ne2k_pci,netdev=n0,addr=0e \
  -serial null -serial null -serial null -serial vc \
  "$@"
