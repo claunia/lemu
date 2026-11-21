@@ -474,6 +474,8 @@ static void bebox_machine_class_init(ObjectClass *oc, const void *data)
         { "i8042", "reset-mode", "0" },
         /* the IDE drive's DMA request and acknowledge go to channel 5 */
         { "isa-ide", "dma", "5" },
+        /* drives of the time had no Ultra DMA; BeOS R4.5 wants MDMA set */
+        { "ide-hd", "udma", "off" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
 
