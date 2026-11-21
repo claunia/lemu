@@ -54,7 +54,8 @@ struct ISAIDEState {
     /*
      * DMA through an ISA DMA channel: the drive's DMARQ and DMACK are
      * wired to a channel of the system's DMA controller. READ and WRITE
-     * DMA go through a bounce buffer that the channel fills or empties.
+     * DMA, and the data of ATAPI packets, go through a bounce buffer that
+     * the channel fills or empties.
      */
     IDEDMA    dma;
     IsaDma    *isa_dma;
@@ -62,6 +63,7 @@ struct ISAIDEState {
     uint8_t   *dma_buf;
     uint32_t  dma_len;          /* bytes in the transfer */
     uint32_t  dma_done;         /* bytes the channel has moved */
+    bool      dma_to_memory;    /* the drive sends, the channel writes RAM */
     QEMUTimer *dma_timer;       /* the drive raises DMARQ */
 };
 
@@ -85,6 +87,21 @@ static void isa_ide_dma_finish(ISAIDEState *s, int ret)
     int64_t sector = ide_get_sector(ide);
 
     isa_ide_dma_stop(s);
+    if (ide->drive_kind == IDE_CD) {
+        if (ret < 0) {
+            block_acct_failed(blk_get_stats(ide->blk), &ide->acct);
+            ide_atapi_io_error(ide, ret);
+        } else {
+            ide->packet_transfer_size = 0;
+            ide->status = READY_STAT | SEEK_STAT;
+            ide->nsector = (ide->nsector & ~7) | ATAPI_INT_REASON_IO |
+                           ATAPI_INT_REASON_CD;
+            ide_bus_set_irq(ide->bus);
+            block_acct_done(blk_get_stats(ide->blk), &ide->acct);
+        }
+        ide_set_inactive(ide, false);
+        return;
+    }
     if (ret < 0) {
         block_acct_failed(blk_get_stats(ide->blk), &ide->acct);
         ide_dma_error(ide);
@@ -98,6 +115,36 @@ static void isa_ide_dma_finish(ISAIDEState *s, int ret)
     ide_set_inactive(ide, false);
 }
 
+/* Read the sectors or take the reply of an ATAPI packet into the buffer */
+static int isa_ide_atapi_fill(ISAIDEState *s, IDEState *ide)
+{
+    int i, n, ret;
+
+    s->dma_len = MAX(ide->packet_transfer_size, 0);
+    s->dma_buf = g_malloc0(MAX(s->dma_len, 1));
+    if (ide->lba == -1) {
+        /* not a read: the reply is in the drive's buffer */
+        s->dma_len = MIN(s->dma_len, ide->io_buffer_total_len);
+        memcpy(s->dma_buf, ide->io_buffer, s->dma_len);
+        return 0;
+    }
+    if (ide->cd_sector_size == 2048) {
+        return blk_pread(ide->blk, (int64_t)ide->lba * 2048, s->dma_len,
+                         s->dma_buf, 0);
+    }
+    /* raw 2352-byte sectors, made from the 2048 bytes of data in each */
+    n = s->dma_len / 2352;
+    for (i = 0; i < n; i++) {
+        ret = blk_pread(ide->blk, (int64_t)(ide->lba + i) * 2048, 2048,
+                        s->dma_buf + i * 2352 + 16, 0);
+        if (ret < 0) {
+            return ret;
+        }
+        cd_data_to_raw(s->dma_buf + i * 2352, ide->lba + i);
+    }
+    return 0;
+}
+
 static void isa_ide_start_dma(const IDEDMA *dma, IDEState *ide,
                               BlockCompletionFunc *cb)
 {
@@ -105,28 +152,38 @@ static void isa_ide_start_dma(const IDEDMA *dma, IDEState *ide,
     int64_t sector = ide_get_sector(ide);
     int ret = 0;
 
-    if (ide->drive_kind == IDE_CD ||
-        (ide->dma_cmd != IDE_DMA_READ && ide->dma_cmd != IDE_DMA_WRITE)) {
-        qemu_log_mask(LOG_UNIMP, "isa-ide: only ATA READ/WRITE DMA\n");
+    if (ide->drive_kind != IDE_CD &&
+        ide->dma_cmd != IDE_DMA_READ && ide->dma_cmd != IDE_DMA_WRITE) {
+        qemu_log_mask(LOG_UNIMP, "isa-ide: only READ/WRITE and ATAPI DMA\n");
         return;
     }
 
     isa_ide_dma_stop(s);
     s->dma_drive = ide;
-    s->dma_len = ide->nsector * BDRV_SECTOR_SIZE;
     s->dma_done = 0;
-    if (sector < 0 || sector + ide->nsector > ide->nb_sectors) {
-        isa_ide_dma_finish(s, -EINVAL);
-        return;
-    }
-    s->dma_buf = g_malloc(s->dma_len);
-    if (ide->dma_cmd == IDE_DMA_READ) {
-        ret = blk_pread(ide->blk, sector * BDRV_SECTOR_SIZE, s->dma_len,
-                        s->dma_buf, 0);
-    }
-    if (ret < 0) {
-        isa_ide_dma_finish(s, ret);
-        return;
+    if (ide->drive_kind == IDE_CD) {
+        s->dma_to_memory = true;
+        ret = isa_ide_atapi_fill(s, ide);
+        if (ret < 0 || s->dma_len == 0) {
+            isa_ide_dma_finish(s, ret);
+            return;
+        }
+    } else {
+        s->dma_to_memory = ide->dma_cmd == IDE_DMA_READ;
+        s->dma_len = ide->nsector * BDRV_SECTOR_SIZE;
+        if (sector < 0 || sector + ide->nsector > ide->nb_sectors) {
+            isa_ide_dma_finish(s, -EINVAL);
+            return;
+        }
+        s->dma_buf = g_malloc(s->dma_len);
+        if (s->dma_to_memory) {
+            ret = blk_pread(ide->blk, sector * BDRV_SECTOR_SIZE, s->dma_len,
+                            s->dma_buf, 0);
+        }
+        if (ret < 0) {
+            isa_ide_dma_finish(s, ret);
+            return;
+        }
     }
     /*
      * Not at once: the guest finishes writing the command before the data
@@ -159,7 +216,7 @@ static int isa_ide_dma_transfer(void *opaque, int nchan, int dma_pos,
     }
     n = MIN(dma_len - dma_pos, s->dma_len - s->dma_done);
     if (n > 0) {
-        if (ide->dma_cmd == IDE_DMA_READ) {
+        if (s->dma_to_memory) {
             k->write_memory(s->isa_dma, nchan, s->dma_buf + s->dma_done,
                             dma_pos, n);
         } else {
@@ -172,7 +229,7 @@ static int isa_ide_dma_transfer(void *opaque, int nchan, int dma_pos,
     if (s->dma_done == s->dma_len) {
         int ret = 0;
 
-        if (ide->dma_cmd == IDE_DMA_WRITE) {
+        if (!s->dma_to_memory) {
             ret = blk_pwrite(ide->blk, ide_get_sector(ide) * BDRV_SECTOR_SIZE,
                              s->dma_len, s->dma_buf, 0);
         }

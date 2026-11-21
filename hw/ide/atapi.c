@@ -72,7 +72,7 @@ static inline int media_is_cd(IDEState *s)
     return (media_present(s) && s->nb_sectors <= CD_MAX_SECTORS);
 }
 
-static void cd_data_to_raw(uint8_t *buf, int lba)
+void cd_data_to_raw(uint8_t *buf, int lba)
 {
     /* sync bytes */
     buf[0] = 0x00;
