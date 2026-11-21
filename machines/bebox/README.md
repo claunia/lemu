@@ -32,7 +32,8 @@ chip; mkflash drops the "BOOT" tag in front of R4.5's:
 BeOS R5 brings no boot ROM; R4.5's boots it. Preview Release 2 carries
 its own (368 KiB, October 1997) in the BFS volume of its CD, see below.
 The first Preview Release brings none; PR2's boots it. Developer
-Release 8 boots with ROM 1.1d7 (bootnub.rom and bootmain.rom).
+Release 8 and BeOS 1.1d7.1 boot with ROM 1.1d7 (bootnub.rom and
+bootmain.rom).
 
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
@@ -106,12 +107,16 @@ Developer Release 8 is on an old Be file system volume that
 `tools/bfs.py` does not read (Aaru extracts it). Its installer
 initializes the disk itself: pick Initialize in the left pop-up menu and
 the SCSI disk in the other, click Begin, then switch back to Install
-From and install onto NewDisk.
+From and install onto NewDisk. BeOS 1.1d7.1 (May 1996) installs the
+same way. It has no PCI network driver: give it an ISA NE2000,
+`-device ne2k_isa,netdev=n0,iobase=0x300,irq=5`, the port and IRQ its
+Network preferences offer.
 
-`dr8/`, `pr/`, `pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the
-`run.sh`, `run.cmd` and `README.txt` of ready-to-run kits: R3, R4.5 and
-R5 on IDE with a DEC 21041, R4 on SCSI with an NE2000, DR8, the Preview
-Release and Preview Release 2 on SCSI with a DEC 21041.
+`1.1d7.1/`, `dr8/`, `pr/`, `pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have
+the `run.sh`, `run.cmd` and `README.txt` of ready-to-run kits: R3, R4.5
+and R5 on IDE with a DEC 21041, R4 on SCSI with a PCI NE2000, DR8, the
+Preview Release and Preview Release 2 on SCSI with a DEC 21041, 1.1d7.1
+on SCSI with an ISA NE2000.
 
 ## Network
 
