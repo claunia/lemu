@@ -23,7 +23,8 @@ the 512 KiB Am29F040 that Be's flash driver also takes:
     tools/bfs.py beos-r4.iso@160186s get /beos/etc/bebox_bootmain.image main.image
     tools/mkflash.py bootnub.rom main.image flash-r4.bin
 
-BeOS R3 carries its own (377 KiB), also for the 512 KiB chip:
+BeOS R3 and R4.5 carry their own (377 and 312 KiB), also for the 512 KiB
+chip; mkflash drops the "BOOT" tag in front of R4.5's:
 
     tools/bfs.py beos-r3.iso@32856s get /beos/etc/bebox_bootmain.image main.image
     tools/mkflash.py bootnub.rom main.image flash-r3.bin
@@ -71,8 +72,9 @@ BeOS reads and writes the IDE disk with DMA: the drive's DMA request is
 wired to ISA DMA channel 5, and the 82378 moves the data with its
 scatter-gather lists.
 
-`r3/` and `r4/` have the `run.sh`, `run.cmd` and `README.txt` of
-ready-to-run kits: R3 on IDE with a DEC 21041, R4 on SCSI with an NE2000.
+`r3/`, `r4/` and `r45/` have the `run.sh`, `run.cmd` and `README.txt` of
+ready-to-run kits: R3 and R4.5 on IDE with a DEC 21041, R4 on SCSI with
+an NE2000.
 
 ## Network
 
