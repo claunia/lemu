@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Turn a MODE1/2352 CD dump (.cue and .bin) into a 2048-byte-sector image.
 

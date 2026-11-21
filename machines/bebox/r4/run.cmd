@@ -1,4 +1,6 @@
 @echo off
+rem Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+rem SPDX-License-Identifier: GPL-2.0-or-later
 cd /d "%~dp0"
 bin\windows-x86_64\qemu-system-ppc.exe ^
  -name "BeOS R4 POWERPC BEBOX" ^

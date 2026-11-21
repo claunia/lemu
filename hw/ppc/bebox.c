@@ -12,6 +12,8 @@
  * 0xfff00000, a 128 KiB Am29F010 or a 512 KiB Am29F040: Be's "nub" in
  * the first sector, the main boot ROM after it.
  *
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 

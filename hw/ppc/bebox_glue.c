@@ -23,6 +23,8 @@
  * the GeekPort, the infrared interface, the joystick and the front-panel
  * LEDs at 0xc00, and the 82378's port 92 (reset).
  *
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Read files from a Be File System (BFS) volume, read-only.
 
