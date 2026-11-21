@@ -483,6 +483,7 @@ static void bebox_machine_class_init(ObjectClass *oc, const void *data)
         { "isa-ide", "dma", "5" },
         /* drives of the time had no Ultra DMA; BeOS R4.5 wants MDMA set */
         { "ide-hd", "udma", "off" },
+        { "ide-cd", "udma", "off" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
 
