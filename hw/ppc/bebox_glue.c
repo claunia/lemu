@@ -21,7 +21,7 @@
  *
  * "bebox-io" holds the small ISA ports of the I/O card: the A/D converter,
  * the GeekPort, the infrared interface, the joystick and the front-panel
- * LEDs at 0xc00.
+ * LEDs at 0xc00, and the 82378's port 92 (reset).
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -29,6 +29,7 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "hw/core/cpu.h"
+#include "system/runstate.h"
 #include "hw/core/irq.h"
 #include "hw/isa/isa.h"
 #include "hw/ppc/bebox.h"
@@ -262,6 +263,7 @@ struct BeBoxIOState {
     MemoryRegion geek;
     MemoryRegion dac;
     MemoryRegion led;
+    MemoryRegion port92;
 
     uint16_t adc_control;
     uint16_t adc_data;
@@ -271,6 +273,7 @@ struct BeBoxIOState {
     uint8_t dac_regs[4];
     uint8_t digital[2];
     uint8_t led_value;
+    uint8_t port92_value;
 };
 
 /*
@@ -445,6 +448,40 @@ static const MemoryRegionOps bebox_led_ops = {
     },
 };
 
+/*
+ * 0x92: the 82378's port 92, alternate reset in bit 0 and alternate A20
+ * gate in bit 1. BeOS restarts the BeBox by setting bit 0.
+ */
+static uint64_t bebox_port92_read(void *opaque, hwaddr addr, unsigned size)
+{
+    BeBoxIOState *s = opaque;
+
+    return s->port92_value;
+}
+
+static void bebox_port92_write(void *opaque, hwaddr addr, uint64_t val,
+                               unsigned size)
+{
+    BeBoxIOState *s = opaque;
+    uint8_t old = s->port92_value;
+
+    trace_bebox_io_write(0x92, val);
+    s->port92_value = val & 0x03;
+    if (!(old & 0x01) && (val & 0x01)) {
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+    }
+}
+
+static const MemoryRegionOps bebox_port92_ops = {
+    .read = bebox_port92_read,
+    .write = bebox_port92_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .impl = {
+        .min_access_size = 1,
+        .max_access_size = 1,
+    },
+};
+
 static void bebox_io_reset(DeviceState *dev)
 {
     BeBoxIOState *s = BEBOX_IO(dev);
@@ -457,6 +494,7 @@ static void bebox_io_reset(DeviceState *dev)
     memset(s->dac_regs, 0, sizeof(s->dac_regs));
     memset(s->digital, 0, sizeof(s->digital));
     s->led_value = 0;
+    s->port92_value = 0;
 }
 
 static void bebox_io_realize(DeviceState *dev, Error **errp)
@@ -473,6 +511,9 @@ static void bebox_io_realize(DeviceState *dev, Error **errp)
     memory_region_init_io(&s->led, OBJECT(s), &bebox_led_ops, s,
                           "bebox-led", 0x1);
     isa_register_ioport(isa, &s->led, 0xc00);
+    memory_region_init_io(&s->port92, OBJECT(s), &bebox_port92_ops, s,
+                          "bebox-port92", 0x1);
+    isa_register_ioport(isa, &s->port92, 0x92);
 }
 
 static const VMStateDescription vmstate_bebox_io = {
@@ -488,6 +529,7 @@ static const VMStateDescription vmstate_bebox_io = {
         VMSTATE_UINT8_ARRAY(dac_regs, BeBoxIOState, 4),
         VMSTATE_UINT8_ARRAY(digital, BeBoxIOState, 2),
         VMSTATE_UINT8(led_value, BeBoxIOState),
+        VMSTATE_UINT8(port92_value, BeBoxIOState),
         VMSTATE_END_OF_LIST()
     }
 };
