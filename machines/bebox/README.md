@@ -46,3 +46,23 @@ The R3 PowerPC CD has one track: give it without `tracks`.
 
 The kernel debugger and the boot ROM's debug output use serial 4, the
 fourth `-serial`, at 19200 baud.
+
+## Installing BeOS R4
+
+Boot the R4 CD with a blank disk (1 GiB is plenty), agree to the
+licence, pick the disk, let the installer initialize it and click Begin.
+A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
+
+    -drive if=none,id=hd0,format=qcow2,file=beos.qcow2
+    -device scsi-hd,drive=hd0,scsi-id=0          # SCSI
+    -device ide-hd,drive=hd0,bus=ide.0,unit=0    # or IDE
+
+`r4/` has the `run.sh`, `run.cmd` and `README.txt` of a ready-to-run kit.
+
+## Known problems
+
+- BeOS's own Restart and the installer's Quit go back to the boot
+  loader without resetting the machine, and the keyboard is dead there:
+  reset the VM (`system_reset` in the monitor) instead.
+- With `-smp 1` the BeOS kernel does not get going; the BeBox always
+  has two CPUs.
