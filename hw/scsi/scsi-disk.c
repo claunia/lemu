@@ -112,6 +112,10 @@ struct SCSIDiskState {
     char *product;
     char *device_id;
     char *loadparm;     /* only for s390x */
+    /* CD tracks: "0:3402:160186" lists the 2048-byte block of each start */
+    char *tracks;
+    uint32_t *track_starts;
+    int ntracks;
     bool tray_open;
     bool tray_locked;
     /*
@@ -1497,6 +1501,12 @@ static int scsi_disk_emulate_read_toc(SCSIRequest *req, uint8_t *outbuf)
     nb_sectors /= s->qdev.blocksize / BDRV_SECTOR_SIZE;
     switch (format) {
     case 0:
+        if (s->ntracks) {
+            toclen = cdrom_read_toc_tracks(nb_sectors, outbuf, msf,
+                                           start_track, s->track_starts,
+                                           s->ntracks);
+            break;
+        }
         toclen = cdrom_read_toc(nb_sectors, outbuf, msf, start_track);
         break;
     case 1:
@@ -1508,6 +1518,12 @@ static int scsi_disk_emulate_read_toc(SCSIRequest *req, uint8_t *outbuf)
         outbuf[3] = 0x01;
         break;
     case 2:
+        if (s->ntracks) {
+            toclen = cdrom_read_toc_raw_tracks(nb_sectors, outbuf, msf,
+                                               start_track, s->track_starts,
+                                               s->ntracks);
+            break;
+        }
         toclen = cdrom_read_toc_raw(nb_sectors, outbuf, msf, start_track);
         break;
     default:
@@ -2692,6 +2708,37 @@ static void scsi_hd_realize(SCSIDevice *dev, Error **errp)
     scsi_realize(&s->qdev, errp);
 }
 
+/*
+ * A CD image made of several data tracks, all MODE1 in one session, such
+ * as a BeOS CD: "tracks" gives the block where each track starts.
+ */
+static bool scsi_cd_parse_tracks(SCSIDiskState *s, Error **errp)
+{
+    g_auto(GStrv) parts = g_strsplit(s->tracks, ":", 0);
+    int n = g_strv_length(parts);
+    int i;
+
+    if (n < 1 || n > 99) {
+        error_setg(errp, "tracks: give 1 to 99 track starts");
+        return false;
+    }
+    g_free(s->track_starts);
+    s->track_starts = g_new(uint32_t, n);
+    for (i = 0; i < n; i++) {
+        uint64_t v;
+
+        if (qemu_strtou64(parts[i], NULL, 0, &v) < 0 || v > UINT32_MAX ||
+            (i == 0 && v != 0) || (i > 0 && v <= s->track_starts[i - 1])) {
+            error_setg(errp, "tracks: '%s' must be increasing block numbers, "
+                       "the first 0", s->tracks);
+            return false;
+        }
+        s->track_starts[i] = v;
+    }
+    s->ntracks = n;
+    return true;
+}
+
 static void scsi_cd_realize(SCSIDevice *dev, Error **errp)
 {
     SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, dev);
@@ -2713,6 +2760,9 @@ static void scsi_cd_realize(SCSIDevice *dev, Error **errp)
     s->qdev.blocksize = blocksize;
     s->qdev.type = TYPE_ROM;
     s->features |= 1 << SCSI_DISK_F_REMOVABLE;
+    if (s->tracks && !scsi_cd_parse_tracks(s, errp)) {
+        return;
+    }
     if (!s->product) {
         s->product = g_strdup("QEMU CD-ROM");
     }
@@ -3441,6 +3491,7 @@ static const TypeInfo scsi_hd_info = {
 
 static const Property scsi_cd_properties[] = {
     DEFINE_SCSI_DISK_PROPERTIES(),
+    DEFINE_PROP_STRING("tracks", SCSIDiskState, tracks),
     DEFINE_PROP_UINT64("wwn", SCSIDiskState, qdev.wwn, 0),
     DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, qdev.port_wwn, 0),
     DEFINE_PROP_UINT16("port_index", SCSIDiskState, port_index, 0),

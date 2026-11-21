@@ -37,120 +37,121 @@ static void lba_to_msf(uint8_t *buf, int lba)
     buf[2] = lba % 75;
 }
 
-/* same toc as bochs. Return -1 if error or the toc length */
-/* XXX: check this */
-int cdrom_read_toc(int nb_sectors, uint8_t *buf, int msf, int start_track)
+static uint8_t *toc_address(uint8_t *q, int msf, int lba)
+{
+    if (msf) {
+        *q++ = 0; /* reserved */
+        lba_to_msf(q, lba);
+        q += 3;
+    } else {
+        stl_be_p(q, lba);
+        q += 4;
+    }
+    return q;
+}
+
+/*
+ * TOC of a one-session data CD whose tracks start at the given blocks
+ * (the first at 0). Return -1 if error or the toc length.
+ */
+int cdrom_read_toc_tracks(int nb_sectors, uint8_t *buf, int msf,
+                          int start_track, const uint32_t *starts,
+                          int ntracks)
 {
     uint8_t *q;
-    int len;
+    int len, t;
 
-    if (start_track > 1 && start_track != 0xaa)
+    if (start_track > ntracks && start_track != 0xaa) {
         return -1;
+    }
     q = buf + 2;
-    *q++ = 1; /* first session */
-    *q++ = 1; /* last session */
-    if (start_track <= 1) {
+    *q++ = 1;       /* first track */
+    *q++ = ntracks; /* last track */
+    for (t = 1; t <= ntracks; t++) {
+        if (t < start_track || start_track == 0xaa) {
+            continue;
+        }
         *q++ = 0; /* reserved */
         *q++ = 0x14; /* ADR, control */
-        *q++ = 1;    /* track number */
+        *q++ = t;    /* track number */
         *q++ = 0; /* reserved */
-        if (msf) {
-            *q++ = 0; /* reserved */
-            lba_to_msf(q, 0);
-            q += 3;
-        } else {
-            /* sector 0 */
-            stl_be_p(q, 0);
-            q += 4;
-        }
+        q = toc_address(q, msf, starts[t - 1]);
     }
     /* lead out track */
     *q++ = 0; /* reserved */
     *q++ = 0x16; /* ADR, control */
     *q++ = 0xaa; /* track number */
     *q++ = 0; /* reserved */
-    if (msf) {
-        *q++ = 0; /* reserved */
-        lba_to_msf(q, nb_sectors);
-        q += 3;
-    } else {
-        stl_be_p(q, nb_sectors);
-        q += 4;
-    }
+    q = toc_address(q, msf, nb_sectors);
     len = q - buf;
     stw_be_p(buf, len - 2);
     return len;
 }
 
+/* same toc as bochs */
+int cdrom_read_toc(int nb_sectors, uint8_t *buf, int msf, int start_track)
+{
+    static const uint32_t start;
+
+    return cdrom_read_toc_tracks(nb_sectors, buf, msf, start_track, &start, 1);
+}
+
+static uint8_t *toc_raw_entry(uint8_t *q, int point, int msf, int lba)
+{
+    *q++ = 1; /* session number */
+    *q++ = 0x14; /* data track */
+    *q++ = 0; /* track number */
+    *q++ = point;
+    *q++ = 0; /* min */
+    *q++ = 0; /* sec */
+    *q++ = 0; /* frame */
+    return toc_address(q, msf, lba);
+}
+
+static uint8_t *toc_raw_track_entry(uint8_t *q, int point, int track)
+{
+    *q++ = 1; /* session number */
+    *q++ = 0x14; /* data track */
+    *q++ = 0; /* track number */
+    *q++ = point;
+    *q++ = 0; /* min */
+    *q++ = 0; /* sec */
+    *q++ = 0; /* frame */
+    *q++ = 0;
+    *q++ = track;
+    *q++ = 0x00; /* disk type */
+    *q++ = 0x00;
+    return q;
+}
+
 /* mostly same info as PearPc */
-int cdrom_read_toc_raw(int nb_sectors, uint8_t *buf, int msf, int session_num)
+int cdrom_read_toc_raw_tracks(int nb_sectors, uint8_t *buf, int msf,
+                              int session_num, const uint32_t *starts,
+                              int ntracks)
 {
     uint8_t *q;
-    int len;
+    int len, t;
 
     q = buf + 2;
     *q++ = 1; /* first session */
     *q++ = 1; /* last session */
 
-    *q++ = 1; /* session number */
-    *q++ = 0x14; /* data track */
-    *q++ = 0; /* track number */
-    *q++ = 0xa0; /* lead-in */
-    *q++ = 0; /* min */
-    *q++ = 0; /* sec */
-    *q++ = 0; /* frame */
-    *q++ = 0;
-    *q++ = 1; /* first track */
-    *q++ = 0x00; /* disk type */
-    *q++ = 0x00;
-
-    *q++ = 1; /* session number */
-    *q++ = 0x14; /* data track */
-    *q++ = 0; /* track number */
-    *q++ = 0xa1;
-    *q++ = 0; /* min */
-    *q++ = 0; /* sec */
-    *q++ = 0; /* frame */
-    *q++ = 0;
-    *q++ = 1; /* last track */
-    *q++ = 0x00;
-    *q++ = 0x00;
-
-    *q++ = 1; /* session number */
-    *q++ = 0x14; /* data track */
-    *q++ = 0; /* track number */
-    *q++ = 0xa2; /* lead-out */
-    *q++ = 0; /* min */
-    *q++ = 0; /* sec */
-    *q++ = 0; /* frame */
-    if (msf) {
-        *q++ = 0; /* reserved */
-        lba_to_msf(q, nb_sectors);
-        q += 3;
-    } else {
-        stl_be_p(q, nb_sectors);
-        q += 4;
-    }
-
-    *q++ = 1; /* session number */
-    *q++ = 0x14; /* ADR, control */
-    *q++ = 0;    /* track number */
-    *q++ = 1;    /* point */
-    *q++ = 0; /* min */
-    *q++ = 0; /* sec */
-    *q++ = 0; /* frame */
-    if (msf) {
-        *q++ = 0;
-        lba_to_msf(q, 0);
-        q += 3;
-    } else {
-        *q++ = 0;
-        *q++ = 0;
-        *q++ = 0;
-        *q++ = 0;
+    q = toc_raw_track_entry(q, 0xa0, 1);        /* first track */
+    q = toc_raw_track_entry(q, 0xa1, ntracks);  /* last track */
+    q = toc_raw_entry(q, 0xa2, msf, nb_sectors); /* lead-out */
+    for (t = 1; t <= ntracks; t++) {
+        q = toc_raw_entry(q, t, msf, starts[t - 1]);
     }
 
     len = q - buf;
     stw_be_p(buf, len - 2);
     return len;
+}
+
+int cdrom_read_toc_raw(int nb_sectors, uint8_t *buf, int msf, int session_num)
+{
+    static const uint32_t start;
+
+    return cdrom_read_toc_raw_tracks(nb_sectors, buf, msf, session_num,
+                                     &start, 1);
 }
