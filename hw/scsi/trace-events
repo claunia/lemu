@@ -394,3 +394,9 @@ scsi_generic_ioctl_sgio_command(uint8_t cmd, uint32_t timeout) "generic ioctl sg
 scsi_generic_ioctl_sgio_done(uint8_t cmd, int ret, uint8_t status, uint8_t host_status) "generic ioctl sgio: cmd=0x%x ret=%d status=0x%x host_status=0x%x"
 scsi_generic_persistent_reserve_out_reply(uint8_t service_action, uint8_t resv_type, uint64_t old_key, uint64_t new_key) "persistent reserve out reply service_action=%u resv_type=%u old_key=0x%" PRIx64 " new_key=0x%" PRIx64
 scsi_generic_pr_state_preempt(uint64_t key, uint8_t resv_type) "key=0x%" PRIx64 " resv_type=%u"
+
+# scsi-md.c
+scsi_md_command(uint32_t id, const char *cdb) "id %u cdb %s"
+scsi_md_check(uint8_t op, uint8_t key, uint8_t asc, uint8_t ascq) "opcode 0x%02x sense %x/%02x/%02x"
+scsi_md_media(bool load) "medium %d"
+scsi_md_tray(bool open) "tray open %d"
