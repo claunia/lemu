@@ -63,6 +63,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(SCSIMDState, SCSI_MD)
 #define MD_PAGES            0x40
 #define MD_SEEK_6           0x0b
 
+/* FORMAT UNIT with IMMED reports progress for this long */
+#define MD_FORMAT_NS        (3 * NANOSECONDS_PER_SECOND)
+
 /* Sense keys */
 #define MD_SK_NO_SENSE          0x0
 #define MD_SK_NOT_READY         0x2
@@ -80,6 +83,7 @@ static const uint8_t md_command_flags[0x100] = {
     [0x00] = MD_IMPLEMENTED | MD_CHECK_READY,   /* TEST UNIT READY */
     [0x01] = MD_IMPLEMENTED | MD_CHECK_READY,   /* REZERO UNIT */
     [0x03] = MD_IMPLEMENTED | MD_ALLOW_UA,      /* REQUEST SENSE */
+    [0x04] = MD_IMPLEMENTED | MD_CHECK_READY,   /* FORMAT UNIT */
     [0x08] = MD_IMPLEMENTED | MD_CHECK_READY,   /* READ (6) */
     [0x0a] = MD_IMPLEMENTED | MD_CHECK_READY,   /* WRITE (6) */
     [0x0b] = MD_IMPLEMENTED | MD_CHECK_READY,   /* SEEK (6) */
@@ -179,6 +183,10 @@ struct SCSIMDState {
     uint8_t utoc[MD_UTOC_SIZE];
 
     uint8_t pages[MD_PAGES][MD_PAGE_LEN];
+
+    /* FORMAT UNIT with IMMED: virtual clock start and end, 0 when idle */
+    int64_t format_start;
+    int64_t format_end;
 };
 
 typedef struct SCSIMDReq {
@@ -449,6 +457,40 @@ static int32_t md_write_protected(SCSIMDReq *r)
     return md_check(r, MD_SK_DATA_PROTECT, 0x27, 0, 0, false, 0, NULL);
 }
 
+/* Formatting: 02/04/04 with the progress in the sense-key specific bytes */
+static uint16_t md_format_progress(SCSIMDState *s)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    uint64_t p = (uint64_t)(now - s->format_start) * 0x10000 / MD_FORMAT_NS;
+
+    return MIN(p, 0xfffe);
+}
+
+static bool md_formatting(SCSIMDState *s)
+{
+    if (s->format_end &&
+        qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) >= s->format_end) {
+        s->format_end = 0;
+    }
+    return s->format_end != 0;
+}
+
+static void md_format_sense(SCSIMDState *s, uint8_t *sense)
+{
+    uint16_t p = md_format_progress(s);
+
+    memset(sense, 0, 18);
+    sense[0] = 0x70;
+    sense[2] = MD_SK_NOT_READY;
+    sense[7] = 10;
+    sense[12] = 0x04;
+    sense[13] = 0x04;
+    sense[14] = 0xc2;
+    sense[15] = 0x80;
+    sense[16] = p >> 8;
+    sense[17] = p;
+}
+
 /* Request buffers */
 
 static uint8_t *md_alloc_buf(SCSIMDReq *r, uint32_t len)
@@ -629,6 +671,38 @@ static int32_t md_mode_select(SCSIMDReq *r, SCSIMDState *s)
     return 0;
 }
 
+/* Erases the disc and lays down the MD DATA U-TOC, as the drive does */
+static int32_t md_format(SCSIMDReq *r, SCSIMDState *s, bool immed)
+{
+    int ret;
+
+    ret = blk_pwrite_zeroes(s->qdev.conf.blk, 0,
+                            (int64_t)md_blocks(s) * MD_BLOCK_SIZE,
+                            BDRV_REQ_MAY_UNMAP);
+    if (ret < 0) {
+        return md_check(r, MD_SK_MEDIUM_ERROR, 0x31, 0, 0, false, 0, NULL);
+    }
+    blk_flush(s->qdev.conf.blk);
+
+    /*
+     * The drive writes the U-TOC itself: Sony's Mac OS driver reads the
+     * disc type right after FORMAT UNIT without writing one.
+     */
+    md_build_formatted_utoc(s->utoc);
+    s->utoc_valid = true;
+    if (!md_utoc_save(s)) {
+        return md_check(r, MD_SK_MEDIUM_ERROR, 0x0c, 0, 0, false, 0, NULL);
+    }
+
+    if (immed) {
+        s->format_start = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+        s->format_end = s->format_start + MD_FORMAT_NS;
+    }
+
+    scsi_req_complete(&r->req, GOOD);
+    return 0;
+}
+
 /* Commands */
 
 static void md_trace_cdb(SCSIMDReq *r)
@@ -658,6 +732,13 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
     }
 
     if (!(flags & MD_ALLOW_UA)) {
+        if (md_formatting(s)) {
+            md_format_sense(s, r->req.sense);
+            r->req.sense_len = 18;
+            trace_scsi_md_check(op, MD_SK_NOT_READY, 0x04, 0x04);
+            scsi_req_complete(&r->req, CHECK_CONDITION);
+            return 0;
+        }
         if (s->media_changed && md_present(s)) {
             s->media_changed = false;
             /* Not ready to ready change, medium may have changed */
@@ -701,7 +782,9 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
 
     case REQUEST_SENSE:
         buf = md_alloc_buf(r, 18);
-        if (s->media_changed && md_present(s)) {
+        if (md_formatting(s)) {
+            md_format_sense(s, buf);
+        } else if (s->media_changed && md_present(s)) {
             s->media_changed = false;
             buf[0] = 0x70;
             buf[2] = MD_SK_UNIT_ATTENTION;
@@ -728,6 +811,16 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
         strpadcpy((char *)buf + 16, 16, s->model->product, ' ');
         strpadcpy((char *)buf + 32, 4, s->model->revision, ' ');
         return md_data_in(r, 36);
+
+    case FORMAT_UNIT:
+        if (md_read_only(s)) {
+            return md_write_protected(r);
+        }
+        /* With FmtData the parameter list header follows */
+        if (cdb[1] & 0x10) {
+            return md_data_out(r);
+        }
+        return md_format(r, s, false);
 
     case READ_6:
     case READ_10:
@@ -897,6 +990,10 @@ static void md_emulate_write_done(SCSIMDReq *r, SCSIMDState *s)
     switch (cdb[0]) {
     case MODE_SELECT:
         md_mode_select(r, s);
+        break;
+
+    case FORMAT_UNIT:
+        md_format(r, s, r->buf[1] & 0x02);
         break;
 
     case 0xd2:
@@ -1167,6 +1264,7 @@ static void md_change_media_cb(void *opaque, bool load, Error **errp)
     s->media_changed = load;
     s->tray_open = !load;
     s->utoc_valid = false;
+    s->format_end = 0;
     trace_scsi_md_media(load);
 }
 
@@ -1227,6 +1325,7 @@ static void md_reset(DeviceState *dev)
         s->utoc_valid = false;
     }
     s->tray_locked = false;
+    s->format_end = 0;
     memcpy(s->pages, s->model->pages, sizeof(s->pages));
 }
 
@@ -1289,6 +1388,8 @@ static const VMStateDescription vmstate_scsi_md = {
         VMSTATE_BOOL(utoc_valid, SCSIMDState),
         VMSTATE_BUFFER(utoc, SCSIMDState),
         VMSTATE_UINT8_2DARRAY(pages, SCSIMDState, MD_PAGES, MD_PAGE_LEN),
+        VMSTATE_INT64(format_start, SCSIMDState),
+        VMSTATE_INT64(format_end, SCSIMDState),
         VMSTATE_END_OF_LIST()
     }
 };
