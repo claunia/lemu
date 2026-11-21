@@ -29,7 +29,8 @@ chip; mkflash drops the "BOOT" tag in front of R4.5's:
     tools/bfs.py beos-r3.iso@32856s get /beos/etc/bebox_bootmain.image main.image
     tools/mkflash.py bootnub.rom main.image flash-r3.bin
 
-BeOS R5 brings no boot ROM; R4.5's boots it.
+BeOS R5 brings no boot ROM; R4.5's boots it. Preview Release 2 carries
+its own (368 KiB, October 1997) in the BFS volume of its CD, see below.
 
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
@@ -49,6 +50,13 @@ from the table of contents. `tools/bin2iso.py` turns a MODE1/2352 `.cue` and
 The R3 PowerPC CD has one track: give it without `tracks`. Its BFS
 volume starts at 2048-byte sector 32856, for `tools/bfs.py`. The boot ROM
 also boots CDs on IDE (`ide-cd`, `bus=ide.0,unit=1`).
+
+The Preview Release 2 CD is a Mac CD with one track and an Apple
+partition map; its BFS volume starts at 512-byte block 101245, byte
+51837440:
+
+    tools/bin2iso.py "BeOS Preview Release 2.cue" beos-pr2.iso
+    tools/bfs.py beos-pr2.iso@51837440 get /beos/etc/bebox_bootmain.image main.image
 
 `tools/bfs.py` lists and copies files from a BFS volume, read-only.
 
@@ -77,9 +85,16 @@ with its scatter-gather lists.
 R5 installs the same way, with the R4.5 boot flash. With the optional
 software it takes about 270 MB: give it a 2 GiB disk.
 
-`r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`, `run.cmd` and
+Preview Release 2's installer only lists initialized disks: click Begin,
+let it open DriveSetup, select the disk and Setup > Initialize > Be File
+System (press and hold through the menus), mount it, and close
+DriveSetup. PR2 shows a wrong date, in December 1901 (and in 1916 with
+`-rtc base=1999-11-21`).
+
+`pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`, `run.cmd` and
 `README.txt` of ready-to-run kits: R3, R4.5 and R5 on IDE with a DEC
-21041, R4 on SCSI with an NE2000.
+21041, R4 on SCSI with an NE2000, Preview Release 2 on SCSI with a DEC
+21041.
 
 ## Network
 
