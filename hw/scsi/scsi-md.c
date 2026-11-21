@@ -46,6 +46,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(SCSIMDState, SCSI_MD)
 #define MD_BLOCKS           70464
 
 #define MD_BUF_SIZE         (128 * KiB)
+#define MD_PAGE_LEN         16
+#define MD_PAGES            0x40
 #define MD_SEEK_6           0x0b
 
 /* Sense keys */
@@ -69,8 +71,10 @@ static const uint8_t md_command_flags[0x100] = {
     [0x0a] = MD_IMPLEMENTED | MD_CHECK_READY,   /* WRITE (6) */
     [0x0b] = MD_IMPLEMENTED | MD_CHECK_READY,   /* SEEK (6) */
     [0x12] = MD_IMPLEMENTED | MD_ALLOW_UA,      /* INQUIRY */
+    [0x15] = MD_IMPLEMENTED,                    /* MODE SELECT (6) */
     [0x16] = MD_IMPLEMENTED,                    /* RESERVE */
     [0x17] = MD_IMPLEMENTED,                    /* RELEASE */
+    [0x1a] = MD_IMPLEMENTED,                    /* MODE SENSE (6) */
     [0x1b] = MD_IMPLEMENTED,                    /* START STOP UNIT */
     [0x1d] = MD_IMPLEMENTED,                    /* SEND DIAGNOSTIC */
     [0x1e] = MD_IMPLEMENTED,                    /* PREVENT/ALLOW MEDIUM REMOVAL */
@@ -92,11 +96,50 @@ typedef struct MDModel {
     const char *name;
     const char *product;
     const char *revision;
+    /* Mode pages: page code, length, parameters */
+    uint8_t pages[MD_PAGES][MD_PAGE_LEN];
 } MDModel;
 
+/*
+ * The mode pages of the MDM-110 as it returns them (Aaru device report),
+ * and of the MDH-10 as captured on the bus from a real drive.
+ */
 static const MDModel md_models[] = {
-    { .name = "mdm110", .product = "MDM110", .revision = "1.01" },
-    { .name = "mdh-10", .product = "MDH-10", .revision = "1.11" },
+    {
+        .name = "mdm110", .product = "MDM110", .revision = "1.01",
+        .pages = {
+            [0x01] = { 0x01, 0x0a, 0x80, 0x03, 0x00, 0x00, 0x00, 0x00,
+                       0x03, 0x00, 0x00, 0x00 },
+            [0x07] = { 0x07, 0x0a, 0x00, 0x03 },
+            [0x08] = { 0x08, 0x0a },
+            [0x20] = { 0x20, 0x0e, 0x00, 0x00, 0x00, 0x20, 0x08, 0x00,
+                       0x64, 0x14 },
+        },
+    },
+    {
+        .name = "mdh-10", .product = "MDH-10", .revision = "1.11",
+        .pages = {
+            [0x01] = { 0x01, 0x0a, 0x80, 0x05, 0x00, 0x00, 0x00, 0x00,
+                       0x05, 0x00, 0x00, 0x00 },
+            [0x07] = { 0x07, 0x0a, 0x00, 0x03 },
+            [0x08] = { 0x08, 0x0a, 0x04 },
+            [0x20] = { 0x20, 0x0e, 0x00, 0x00, 0x00, 0x20, 0x09, 0x20,
+                       0x25 },
+            /* Audio volume, channels 1 and 2 */
+            [0x21] = { 0x21, 0x0e, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+                       0x01, 0x10, 0x02, 0x10 },
+        },
+    },
+};
+
+/* What MODE SELECT can change, as the MDM-110 reports it */
+static const uint8_t md_pages_changeable[MD_PAGES][MD_PAGE_LEN] = {
+    [0x01] = { 0x01, 0x0a, 0xb7, 0xff, 0x00, 0x00, 0x00, 0x00, 0xff },
+    [0x07] = { 0x07, 0x0a, 0x07, 0xff },
+    [0x08] = { 0x08, 0x0a, 0x05 },
+    [0x20] = { 0x20, 0x0e, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff },
+    [0x21] = { 0x21, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff,
+               0x00, 0xff },
 };
 
 struct SCSIMDState {
@@ -109,6 +152,8 @@ struct SCSIMDState {
     bool tray_locked;
     /* A disc went in: the next command gets a UNIT ATTENTION */
     bool media_changed;
+
+    uint8_t pages[MD_PAGES][MD_PAGE_LEN];
 };
 
 typedef struct SCSIMDReq {
@@ -184,6 +229,11 @@ static int32_t md_invalid_field(SCSIMDReq *r, int byte)
     return md_check(r, MD_SK_ILLEGAL_REQUEST, 0x24, 0, 0xc7, false, 0, sks);
 }
 
+static int32_t md_invalid_param_list(SCSIMDReq *r)
+{
+    return md_check(r, MD_SK_ILLEGAL_REQUEST, 0x26, 0, 0, false, 0, NULL);
+}
+
 static int32_t md_lba_out_of_range(SCSIMDReq *r, uint32_t lba)
 {
     return md_check(r, MD_SK_ILLEGAL_REQUEST, 0x21, 0, 0, true, lba, NULL);
@@ -231,6 +281,147 @@ static int32_t md_data_out(SCSIMDReq *r)
     md_alloc_buf(r, len);
     r->len = len;
     return -(int32_t)len;
+}
+
+/* Mode pages */
+
+static uint8_t md_page_byte(SCSIMDState *s, int pc, int page, int pos)
+{
+    switch (pc) {
+    case 1:
+        return md_pages_changeable[page][pos];
+    case 2:
+        return s->model->pages[page][pos];
+    default:
+        return s->pages[page][pos];
+    }
+}
+
+static bool md_page_valid(SCSIMDState *s, int page)
+{
+    return page < MD_PAGES && s->model->pages[page][1] != 0;
+}
+
+static int32_t md_mode_sense(SCSIMDReq *r, SCSIMDState *s, const uint8_t *cdb)
+{
+    bool block_desc = !(cdb[1] & 0x08);
+    int pc = cdb[2] >> 6;
+    int page = cdb[2] & 0x3f;
+    uint8_t *buf;
+    int pos = 4;
+
+    if (pc == 3) {
+        /* Saving parameters not supported */
+        return md_check(r, MD_SK_ILLEGAL_REQUEST, 0x39, 0, 0, false, 0, NULL);
+    }
+    if (page != 0x3f && !md_page_valid(s, page)) {
+        return md_invalid_field(r, 2);
+    }
+
+    buf = md_alloc_buf(r, 256);
+    if (block_desc) {
+        /* No block count, and a changeable block length */
+        if (pc == 1) {
+            buf[pos + 5] = 0xff;
+            buf[pos + 6] = 0xff;
+            buf[pos + 7] = 0xff;
+        } else {
+            buf[pos + 6] = MD_BLOCK_SIZE >> 8;
+            buf[pos + 7] = MD_BLOCK_SIZE & 0xff;
+        }
+        pos += 8;
+    }
+
+    for (int i = 0; i < 0x3f; i++) {
+        int len;
+
+        if ((page != 0x3f && page != i) || !md_page_valid(s, i)) {
+            continue;
+        }
+        len = s->model->pages[i][1];
+        buf[pos++] = md_page_byte(s, pc, i, 0);
+        buf[pos++] = len;
+        for (int j = 0; j < len; j++) {
+            buf[pos++] = (j + 2 < MD_PAGE_LEN) ? md_page_byte(s, pc, i, j + 2)
+                                               : 0;
+        }
+    }
+
+    buf[0] = pos - 1;
+    buf[1] = md_present(s) ? 0x03 : 0x00;    /* Medium type: MD DATA */
+    /* Write protected, also without a disc */
+    buf[2] = (!md_present(s) || md_read_only(s)) ? 0x80 : 0x00;
+    buf[3] = block_desc ? 8 : 0;
+
+    return md_data_in(r, pos);
+}
+
+static int32_t md_mode_select(SCSIMDReq *r, SCSIMDState *s)
+{
+    const uint8_t *buf = r->buf;
+    uint32_t len = MIN(r->req.cmd.buf[4], r->req.cmd.xfer);
+    uint32_t block_desc_len, pos;
+    uint8_t pages[MD_PAGES][MD_PAGE_LEN];
+
+    if (len == 0) {
+        scsi_req_complete(&r->req, GOOD);
+        return 0;
+    }
+    if (len < 4) {
+        return md_invalid_param_list(r);
+    }
+
+    block_desc_len = buf[3];
+    pos = 4 + block_desc_len;
+    if (pos > len) {
+        return md_invalid_param_list(r);
+    }
+
+    /* The block length can only be the one of the disc */
+    if (block_desc_len >= 8) {
+        uint32_t block_len = (buf[9] << 16) | (buf[10] << 8) | buf[11];
+
+        if (block_len != 0 && block_len != MD_BLOCK_SIZE) {
+            return md_invalid_param_list(r);
+        }
+    }
+
+    /* Nothing changes unless all of the list is good */
+    memcpy(pages, s->pages, sizeof(pages));
+
+    while (pos + 2 <= len) {
+        /* The PS bit, which Sony's Mac OS driver sends back, is ignored */
+        int page = buf[pos] & 0x3f;
+        uint32_t page_len = buf[pos + 1];
+
+        if (!md_page_valid(s, page) || pos + 2 + page_len > len) {
+            return md_invalid_param_list(r);
+        }
+
+        for (uint32_t i = 0; i < page_len; i++) {
+            uint8_t val = buf[pos + 2 + i];
+            uint8_t old, ch;
+
+            if (i + 2 >= MD_PAGE_LEN) {
+                if (val) {
+                    return md_invalid_param_list(r);
+                }
+                continue;
+            }
+            ch = md_pages_changeable[page][i + 2];
+            old = pages[page][i + 2];
+            if ((val ^ old) & ~ch) {
+                return md_invalid_param_list(r);
+            }
+            pages[page][i + 2] = (old & ~ch) | (val & ch);
+        }
+
+        pos += 2 + page_len;
+    }
+
+    memcpy(s->pages, pages, sizeof(pages));
+    scsi_req_complete(&r->req, GOOD);
+    return 0;
 }
 
 /* Commands */
@@ -400,6 +591,12 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
         stl_be_p(buf + 4, MD_BLOCK_SIZE);
         return md_data_in(r, 8);
 
+    case MODE_SENSE:
+        return md_mode_sense(r, s, cdb);
+
+    case MODE_SELECT:
+        return md_data_out(r);
+
     case START_STOP:
         if ((cdb[4] & 3) == 2) {
             /* Eject */
@@ -437,8 +634,18 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
 /* Data from the host for an emulated command has arrived */
 static void md_emulate_write_done(SCSIMDReq *r, SCSIMDState *s)
 {
-    /* SEND DIAGNOSTIC and VERIFY with byte compare: accepted */
-    scsi_req_complete(&r->req, GOOD);
+    const uint8_t *cdb = r->req.cmd.buf;
+
+    switch (cdb[0]) {
+    case MODE_SELECT:
+        md_mode_select(r, s);
+        break;
+
+    default:
+        /* SEND DIAGNOSTIC and VERIFY with byte compare: accepted */
+        scsi_req_complete(&r->req, GOOD);
+        break;
+    }
 }
 
 /* Disc I/O */
@@ -728,6 +935,7 @@ static void md_reset(DeviceState *dev)
         s->media_changed = true;
         }
     s->tray_locked = false;
+    memcpy(s->pages, s->model->pages, sizeof(s->pages));
 }
 
 static void md_realize(SCSIDevice *dev, Error **errp)
@@ -770,6 +978,7 @@ static void md_realize(SCSIDevice *dev, Error **errp)
     dev->blocksize = MD_BLOCK_SIZE;
     dev->max_lba = MD_BLOCKS - 1;
 
+    memcpy(s->pages, s->model->pages, sizeof(s->pages));
     s->media_changed = blk_is_inserted(dev->conf.blk);
 
     blk_set_dev_ops(dev->conf.blk, &md_block_ops, s);
@@ -785,6 +994,7 @@ static const VMStateDescription vmstate_scsi_md = {
         VMSTATE_BOOL(tray_open, SCSIMDState),
         VMSTATE_BOOL(tray_locked, SCSIMDState),
         VMSTATE_BOOL(media_changed, SCSIMDState),
+        VMSTATE_UINT8_2DARRAY(pages, SCSIMDState, MD_PAGES, MD_PAGE_LEN),
         VMSTATE_END_OF_LIST()
     }
 };
