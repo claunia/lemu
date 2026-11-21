@@ -2,6 +2,7 @@
  * IDE device functions
  *
  * Copyright (c) 2009 Gerd Hoffmann <kraxel@redhat.com>
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -219,6 +220,8 @@ static const TypeInfo ide_hd_info = {
 
 static const Property ide_cd_properties[] = {
     DEFINE_IDE_DEV_PROPERTIES(),
+    /* "0:3402:160186": the block where each data track starts */
+    DEFINE_PROP_STRING("tracks", IDEDrive, dev.tracks),
 };
 
 static void ide_cd_class_init(ObjectClass *klass, const void *data)

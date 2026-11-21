@@ -29,6 +29,8 @@
 #include "qemu/osdep.h"
 #include "qemu/bswap.h"
 #include "hw/scsi/scsi.h"
+#include "qapi/error.h"
+#include "qemu/cutils.h"
 
 static void lba_to_msf(uint8_t *buf, int lba)
 {
@@ -155,4 +157,39 @@ int cdrom_read_toc_raw(int nb_sectors, uint8_t *buf, int msf, int session_num)
 
     return cdrom_read_toc_raw_tracks(nb_sectors, buf, msf, session_num,
                                      &start, 1);
+}
+
+/*
+ * A CD image made of several data tracks, all MODE1 in one session, such
+ * as a BeOS CD: "0:3402:160186" gives the block where each track starts.
+ */
+bool cdrom_parse_tracks(const char *tracks, uint32_t **starts, int *ntracks,
+                        Error **errp)
+{
+    g_auto(GStrv) parts = g_strsplit(tracks, ":", 0);
+    int n = g_strv_length(parts);
+    g_autofree uint32_t *v = NULL;
+    int i;
+
+    if (n < 1 || n > 99) {
+        error_setg(errp, "tracks: give 1 to 99 track starts");
+        return false;
+    }
+    v = g_new(uint32_t, n);
+    for (i = 0; i < n; i++) {
+        uint64_t start;
+
+        if (qemu_strtou64(parts[i], NULL, 0, &start) < 0 ||
+            start > UINT32_MAX || (i == 0 && start != 0) ||
+            (i > 0 && start <= v[i - 1])) {
+            error_setg(errp, "tracks: '%s' must be increasing block numbers, "
+                       "the first 0", tracks);
+            return false;
+        }
+        v[i] = start;
+    }
+    g_free(*starts);
+    *starts = g_steal_pointer(&v);
+    *ntracks = n;
+    return true;
 }

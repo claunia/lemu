@@ -128,6 +128,8 @@ int cdrom_read_toc_tracks(int nb_sectors, uint8_t *buf, int msf,
 int cdrom_read_toc_raw_tracks(int nb_sectors, uint8_t *buf, int msf,
                               int session_num, const uint32_t *starts,
                               int ntracks);
+bool cdrom_parse_tracks(const char *tracks, uint32_t **starts, int *ntracks,
+                        Error **errp);
 
 /* scsi-bus.c */
 struct SCSIReqOps {

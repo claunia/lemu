@@ -2710,37 +2710,6 @@ static void scsi_hd_realize(SCSIDevice *dev, Error **errp)
     scsi_realize(&s->qdev, errp);
 }
 
-/*
- * A CD image made of several data tracks, all MODE1 in one session, such
- * as a BeOS CD: "tracks" gives the block where each track starts.
- */
-static bool scsi_cd_parse_tracks(SCSIDiskState *s, Error **errp)
-{
-    g_auto(GStrv) parts = g_strsplit(s->tracks, ":", 0);
-    int n = g_strv_length(parts);
-    int i;
-
-    if (n < 1 || n > 99) {
-        error_setg(errp, "tracks: give 1 to 99 track starts");
-        return false;
-    }
-    g_free(s->track_starts);
-    s->track_starts = g_new(uint32_t, n);
-    for (i = 0; i < n; i++) {
-        uint64_t v;
-
-        if (qemu_strtou64(parts[i], NULL, 0, &v) < 0 || v > UINT32_MAX ||
-            (i == 0 && v != 0) || (i > 0 && v <= s->track_starts[i - 1])) {
-            error_setg(errp, "tracks: '%s' must be increasing block numbers, "
-                       "the first 0", s->tracks);
-            return false;
-        }
-        s->track_starts[i] = v;
-    }
-    s->ntracks = n;
-    return true;
-}
-
 static void scsi_cd_realize(SCSIDevice *dev, Error **errp)
 {
     SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, dev);
@@ -2762,7 +2731,8 @@ static void scsi_cd_realize(SCSIDevice *dev, Error **errp)
     s->qdev.blocksize = blocksize;
     s->qdev.type = TYPE_ROM;
     s->features |= 1 << SCSI_DISK_F_REMOVABLE;
-    if (s->tracks && !scsi_cd_parse_tracks(s, errp)) {
+    if (s->tracks && !cdrom_parse_tracks(s->tracks, &s->track_starts,
+                                         &s->ntracks, errp)) {
         return;
     }
     if (!s->product) {

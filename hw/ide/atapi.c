@@ -1112,7 +1112,12 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
 
     switch(format) {
     case 0:
-        len = cdrom_read_toc(total_sectors, buf, msf, start_track);
+        if (s->ntracks) {
+            len = cdrom_read_toc_tracks(total_sectors, buf, msf, start_track,
+                                        s->track_starts, s->ntracks);
+        } else {
+            len = cdrom_read_toc(total_sectors, buf, msf, start_track);
+        }
         if (len < 0)
             goto error_cmd;
         ide_atapi_cmd_reply(s, len, max_len);
@@ -1126,7 +1131,13 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
         ide_atapi_cmd_reply(s, 12, max_len);
         break;
     case 2:
-        len = cdrom_read_toc_raw(total_sectors, buf, msf, start_track);
+        if (s->ntracks) {
+            len = cdrom_read_toc_raw_tracks(total_sectors, buf, msf,
+                                            start_track, s->track_starts,
+                                            s->ntracks);
+        } else {
+            len = cdrom_read_toc_raw(total_sectors, buf, msf, start_track);
+        }
         if (len < 0)
             goto error_cmd;
         ide_atapi_cmd_reply(s, len, max_len);

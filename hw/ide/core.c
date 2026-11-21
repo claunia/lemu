@@ -42,6 +42,7 @@
 #include "qemu/cutils.h"
 #include "system/replay.h"
 #include "system/runstate.h"
+#include "hw/scsi/scsi.h"
 #include "ide-internal.h"
 #include "trace.h"
 
@@ -2641,6 +2642,11 @@ int ide_init_drive(IDEState *s, IDEDevice *dev, IDEDriveKind kind, Error **errp)
 
     blk_get_geometry(s->blk, &nb_sectors);
     s->win2k_install_hack = dev->win2k_install_hack;
+    if (kind == IDE_CD && dev->tracks &&
+        !cdrom_parse_tracks(dev->tracks, &s->track_starts, &s->ntracks,
+                            errp)) {
+        return -1;
+    }
     s->cylinders = dev->conf.cyls;
     s->heads = s->drive_heads = dev->conf.heads;
     s->sectors = s->drive_sectors = dev->conf.secs;
