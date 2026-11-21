@@ -390,8 +390,15 @@ static void bebox_init(MachineState *machine)
     s->isa_irqs = qemu_allocate_irqs(bebox_isa_irq, s, ISA_NUM_IRQS);
     isa_bus_register_input_irqs(isa_bus, s->isa_irqs);
 
-    /* bq3285 RTC */
+    /*
+     * bq3285 RTC. The year register holds the last two digits of the
+     * year, which BeOS reads as 1970 to 2069. There is no century
+     * byte: 0x32 is CMOS RAM under the boot ROM's checksum, and a
+     * bad checksum sets the clock back to December 1994.
+     */
     isa_dev = isa_new(TYPE_MC146818_RTC);
+    qdev_prop_set_int32(DEVICE(isa_dev), "base_year", 2000);
+    qdev_prop_set_bit(DEVICE(isa_dev), "century-byte", false);
     isa_realize_and_unref(isa_dev, isa_bus, &error_fatal);
 
     /* 82091AA: floppy, serial 1 and 2, parallel, IDE, and the 8042 */
