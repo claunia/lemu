@@ -115,9 +115,9 @@ sound file plays. Fix such a disk once in a Terminal:
 
 ## Known problems
 
-- BeOS's own Restart and the installer's Quit go back to the boot
-  loader without resetting the machine, and the keyboard is dead there:
-  reset the VM (`system_reset` in the monitor) instead.
+- Now and then a BeOS Restart panics in the kernel debugger at the end
+  of the shutdown, before the boot ROM runs: reset the VM
+  (`system_reset` in the monitor).
 - Sound has short dropouts now and then: the guest's mixer is late
   with a buffer, as both CPUs share one host thread and BeOS's idle
   loop never halts them.
