@@ -28,16 +28,17 @@ Am29F040.
 
 ## CDs
 
-BeOS CDs from R3 on have several tracks: ISO 9660 and HFS for other systems,
+The BeOS R4 CD and later ones have several tracks: ISO 9660 and HFS for other systems,
 then BFS volumes for x86 and PowerPC. The boot ROM finds the PowerPC volume
 from the table of contents. `tools/bin2iso.py` turns a MODE1/2352 `.cue` and
 `.bin` dump into a 2048-byte image and prints the track starts for the
-`tracks` property of `scsi-cd`. The ROM only takes the CD drives it knows,
-so give the drive a Toshiba name:
+`tracks` property of `scsi-cd`:
 
     tools/bin2iso.py "BeOS Release 4.cue" beos-r4.iso      # tracks=0:3402:160186
     -drive if=none,id=cd0,media=cdrom,readonly=on,format=raw,file=beos-r4.iso
-    -device scsi-cd,drive=cd0,scsi-id=3,vendor=TOSHIBA,product="CD-ROM XM-3401TA",tracks=0:3402:160186
+    -device scsi-cd,drive=cd0,scsi-id=3,tracks=0:3402:160186
+
+The R3 PowerPC CD has one track: give it without `tracks`.
 
 `tools/bfs.py` lists and copies files from a BFS volume, read-only.
 
