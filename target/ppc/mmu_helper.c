@@ -101,6 +101,14 @@ static void ppc6xx_tlb_store(CPUPPCState *env, target_ulong EPN, int way,
                   EPN, pte0, pte1);
     /* Invalidate any pending reference in QEMU for this virtual address */
     ppc6xx_tlb_invalidate_virt2(env, EPN, is_code, 1);
+    /*
+     * The entry this one replaces is gone from the CPU: drop QEMU's copy of
+     * its translation too, or a later tlbie of that page, finding nothing
+     * here, would leave it in place after the OS remaps the page.
+     */
+    if (pte_is_valid(tlb->pte0) && tlb->EPN != EPN) {
+        tlb_flush_page(env_cpu(env), tlb->EPN);
+    }
     tlb->pte0 = pte0;
     tlb->pte1 = pte1;
     tlb->EPN = EPN;
