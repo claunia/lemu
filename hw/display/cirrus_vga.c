@@ -184,6 +184,7 @@ typedef void (*cirrus_fill_t)(struct CirrusVGAState *s,
 struct PCICirrusVGAState {
     PCIDevice dev;
     CirrusVGAState cirrus_vga;
+    uint32_t bar_mb;
 };
 
 #define TYPE_PCI_CIRRUS_VGA "cirrus-vga"
@@ -3038,6 +3039,10 @@ static void pci_cirrus_vga_realize(PCIDevice *dev, Error **errp)
                    s->vga.vram_size_mb);
         return;
     }
+    if (d->bar_mb != 16 && d->bar_mb != 32) {
+        error_setg(errp, "cirrus-vga: bar0-mb must be 16 or 32");
+        return;
+    }
     /* setup VGA */
     if (!vga_common_init(&s->vga, OBJECT(dev), errp)) {
         return;
@@ -3047,12 +3052,19 @@ static void pci_cirrus_vga_realize(PCIDevice *dev, Error **errp)
     s->vga.con = qemu_graphic_console_create(DEVICE(dev), 0, s->vga.hw_ops, &s->vga);
 
     /* setup PCI */
-    memory_region_init(&s->pci_bar, OBJECT(dev), "cirrus-pci-bar0", 0x2000000);
+    memory_region_init(&s->pci_bar, OBJECT(dev), "cirrus-pci-bar0",
+                       d->bar_mb * MiB);
 
     /* XXX: add byte swapping apertures */
     memory_region_add_subregion(&s->pci_bar, 0, &s->cirrus_linear_io);
-    memory_region_add_subregion(&s->pci_bar, 0x1000000,
-                                &s->cirrus_linear_bitblt_io);
+    /*
+     * The blitter aperture at 16 MiB is QEMU's own; a 16 MiB BAR, as
+     * firmware that packs BARs without aligning them needs, has none.
+     */
+    if (d->bar_mb == 32) {
+        memory_region_add_subregion(&s->pci_bar, 0x1000000,
+                                    &s->cirrus_linear_bitblt_io);
+    }
 
     /* setup memory space */
     /* memory #0 LFB */
@@ -3071,6 +3083,7 @@ static const Property pci_vga_cirrus_properties[] = {
                      cirrus_vga.enable_blitter, true),
     DEFINE_PROP_BOOL("partial-init", struct PCICirrusVGAState,
                      cirrus_vga.vga.partial_init, false),
+    DEFINE_PROP_UINT32("bar0-mb", struct PCICirrusVGAState, bar_mb, 32),
 };
 
 static void cirrus_vga_class_init(ObjectClass *klass, const void *data)
