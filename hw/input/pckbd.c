@@ -389,6 +389,14 @@ static void kbd_write_command(void *opaque, hwaddr addr,
         break;
     case KBD_CCMD_SELF_TEST:
         s->status |= KBD_STAT_SELFTEST;
+        /*
+         * The controller's firmware starts over, as on a PS/2 controller:
+         * keyboard and mouse interfaces disabled, no interrupts, no
+         * translation, and the output port as after a reset.
+         */
+        s->mode = KBD_MODE_DISABLE_KBD | KBD_MODE_DISABLE_MOUSE;
+        s->outport = KBD_OUT_RESET | KBD_OUT_A20 | KBD_OUT_ONES;
+        s->write_cmd = 0;
         if (s->selftest_reply_first) {
             kbd_ctrl_reset(s);
         }
