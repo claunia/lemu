@@ -2,6 +2,7 @@
  * QEMU Intel 82374 emulation (Enhanced DMA controller)
  *
  * Copyright (c) 2010 Hervé Poussineau
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,8 +45,6 @@ do { fprintf(stderr, "i82374: " fmt , ## __VA_ARGS__); } while (0)
 #define DPRINTF(fmt, ...) \
 do {} while (0)
 #endif
-#define BADF(fmt, ...) \
-    qemu_log_mask(LOG_UNIMP, "i82374: " fmt, ## __VA_ARGS__)
 
 struct I82374State {
     ISADevice parent_obj;
@@ -53,6 +52,7 @@ struct I82374State {
     uint32_t iobase;
     uint8_t commands[8];
     PortioList port_list;
+    I8257State *dma[2];
 };
 
 static const VMStateDescription vmstate_i82374 = {
@@ -65,31 +65,50 @@ static const VMStateDescription vmstate_i82374 = {
     },
 };
 
+/*
+ * The scatter-gather registers, one per channel (channel 4, the cascade,
+ * has none): commands at 0x10, status at 0x18, descriptor table pointers
+ * at 0x20. The DMA controllers do the work.
+ */
+static I8257State *i82374_chan(I82374State *s, int nchan, int *ichan)
+{
+    *ichan = nchan & 3;
+    return s->dma[nchan >> 2];
+}
+
 static uint32_t i82374_read_isr(void *opaque, uint32_t nport)
 {
-    uint32_t val = 0;
+    I82374State *s = opaque;
+    uint32_t val;
 
-    BADF("%s: %08x\n", __func__, nport);
-
+    val = (i8257_sg_irq_status(s->dma[0]) & 0x0f) |
+          ((i8257_sg_irq_status(s->dma[1]) & 0x0e) << 4);
     DPRINTF("%s: %08x=%08x\n", __func__, nport, val);
     return val;
 }
 
 static void i82374_write_command(void *opaque, uint32_t nport, uint32_t data)
 {
-    DPRINTF("%s: %08x=%08x\n", __func__, nport, data);
+    I82374State *s = opaque;
+    int nchan = (nport - s->iobase) & 7;
+    int ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
 
-    if (data != 0x42) {
-        /* Not Stop S/G command */
-        BADF("%s: %08x=%08x\n", __func__, nport, data);
+    DPRINTF("%s: %08x=%08x\n", __func__, nport, data);
+    if (nchan == 4) {
+        return;
     }
+    s->commands[nchan] = data;
+    i8257_sg_command(d, ichan, data);
 }
 
 static uint32_t i82374_read_status(void *opaque, uint32_t nport)
 {
-    uint32_t val = 0;
-
-    BADF("%s: %08x\n", __func__, nport);
+    I82374State *s = opaque;
+    int nchan = (nport - s->iobase) & 7;
+    int ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
+    uint32_t val = nchan == 4 ? 0 : i8257_sg_status(d, ichan);
 
     DPRINTF("%s: %08x=%08x\n", __func__, nport, val);
     return val;
@@ -97,19 +116,57 @@ static uint32_t i82374_read_status(void *opaque, uint32_t nport)
 
 static void i82374_write_descriptor(void *opaque, uint32_t nport, uint32_t data)
 {
-    DPRINTF("%s: %08x=%08x\n", __func__, nport, data);
+    I82374State *s = opaque;
+    int off = nport - s->iobase - 0x20;
+    int nchan = off >> 2, shift = (off & 3) * 8, ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
+    uint32_t ptr;
 
-    BADF("%s: %08x=%08x\n", __func__, nport, data);
+    DPRINTF("%s: %08x=%08x\n", __func__, nport, data);
+    if (nchan == 4) {
+        return;
+    }
+    ptr = i8257_sg_get_pointer(d, ichan);
+    ptr = (ptr & ~(0xffu << shift)) | ((data & 0xff) << shift);
+    i8257_sg_set_pointer(d, ichan, ptr);
 }
 
 static uint32_t i82374_read_descriptor(void *opaque, uint32_t nport)
 {
+    I82374State *s = opaque;
+    int off = nport - s->iobase - 0x20;
+    int nchan = off >> 2, shift = (off & 3) * 8, ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
     uint32_t val = 0;
 
-    BADF("%s: %08x\n", __func__, nport);
-
+    if (nchan != 4) {
+        val = (i8257_sg_get_pointer(d, ichan) >> shift) & 0xff;
+    }
     DPRINTF("%s: %08x=%08x\n", __func__, nport, val);
     return val;
+}
+
+/* The pointers are also written and read whole, as the 82378 allows */
+static void i82374_write_descriptor32(void *opaque, uint32_t nport,
+                                      uint32_t data)
+{
+    I82374State *s = opaque;
+    int nchan = ((nport - s->iobase - 0x20) >> 2) & 7, ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
+
+    DPRINTF("%s: %08x=%08x\n", __func__, nport, data);
+    if (nchan != 4) {
+        i8257_sg_set_pointer(d, ichan, data);
+    }
+}
+
+static uint32_t i82374_read_descriptor32(void *opaque, uint32_t nport)
+{
+    I82374State *s = opaque;
+    int nchan = ((nport - s->iobase - 0x20) >> 2) & 7, ichan;
+    I8257State *d = i82374_chan(s, nchan, &ichan);
+
+    return nchan == 4 ? 0 : i8257_sg_get_pointer(d, ichan);
 }
 
 static const MemoryRegionPortio i82374_portio_list[] = {
@@ -118,6 +175,8 @@ static const MemoryRegionPortio i82374_portio_list[] = {
     { 0x18, 8, 1, .read = i82374_read_status, },
     { 0x20, 0x20, 1,
       .write = i82374_write_descriptor, .read = i82374_read_descriptor, },
+    { 0x20, 0x20, 4,
+      .write = i82374_write_descriptor32, .read = i82374_read_descriptor32, },
     PORTIO_END_OF_LIST(),
 };
 
@@ -131,6 +190,11 @@ static void i82374_realize(DeviceState *dev, Error **errp)
         return;
     }
     i8257_dma_init(OBJECT(dev), isa_bus, true);
+    s->dma[0] = I8257(isa_bus_get_dma(isa_bus, 0));
+    s->dma[1] = I8257(isa_bus_get_dma(isa_bus, 4));
+    /* the end of a scatter-gather list can raise IRQ13 */
+    s->dma[0]->sg_irq_out = isa_get_irq(ISA_DEVICE(dev), 13);
+    s->dma[1]->sg_irq_out = isa_get_irq(ISA_DEVICE(dev), 13);
 
     portio_list_init(&s->port_list, OBJECT(s), i82374_portio_list, s,
                      "i82374");
