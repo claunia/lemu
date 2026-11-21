@@ -28,6 +28,7 @@
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "hw/dma/i8257.h"
+#include "hw/core/irq.h"
 #include "exec/cpu-common.h"
 #include "system/physmem.h"
 #include "qapi/error.h"
@@ -267,6 +268,9 @@ static void i8257_write_cont(void *opaque, hwaddr nport, uint64_t data,
         d->mask = ~0;
         d->status = 0;
         d->command = 0;
+        memset(d->sg_status, 0, sizeof(d->sg_status));
+        d->sg_irq = 0;
+        qemu_irq_lower(d->sg_irq_out);
         break;
 
     case 0x06:                  /* clear mask for all channels */
@@ -342,12 +346,60 @@ static void i8257_dma_release_DREQ(IsaDma *obj, int nchan)
     i8257_dma_run(d);
 }
 
+/*
+ * Fetch the next scatter-gather descriptor into the channel's buffer:
+ * a little-endian PCI address, then the byte count less one in bits
+ * 23:0 and the end of the list in bit 31.
+ */
+static void i8257_sg_fetch(I8257State *d, int ichan)
+{
+    uint32_t desc[2];
+
+    physical_memory_read(d->sg_ptr[ichan] & 0x7fffffff, desc, sizeof(desc));
+    d->sg_ptr[ichan] += 8;
+    d->sg_addr[ichan] = le32_to_cpu(desc[0]);
+    d->sg_len[ichan] = (le32_to_cpu(desc[1]) & 0xffffff) + 1;
+    d->sg_status[ichan] |= I8257_SG_CURRENT;
+    if (le32_to_cpu(desc[1]) & 0x80000000) {
+        d->sg_status[ichan] |= I8257_SG_LAST;
+    }
+    d->regs[ichan].now[COUNT] = 0;
+}
+
+/* The last buffer is done, or software stopped the list */
+static void i8257_sg_end(I8257State *d, int ichan)
+{
+    d->sg_status[ichan] &= ~(I8257_SG_ACTIVE | I8257_SG_CURRENT);
+    d->mask |= 1 << ichan;
+    d->status |= 1 << ichan;
+    if (d->sg_status[ichan] & I8257_SG_IRQ13) {
+        d->sg_irq |= 1 << ichan;
+        qemu_irq_raise(d->sg_irq_out);
+    }
+}
+
 static void i8257_channel_run(I8257State *d, int ichan)
 {
     int ncont = d->dshift;
     int shift = i8257_chan_shift(d, ichan);
     int n;
     I8257Regs *r = &d->regs[ichan];
+
+    if (d->sg_status[ichan] & I8257_SG_ACTIVE) {
+        uint32_t len = d->sg_len[ichan];
+
+        n = r->transfer_handler(r->opaque, ichan + (ncont << 2),
+                                r->now[COUNT], len);
+        r->now[COUNT] = n;
+        if (n == len) {
+            if (d->sg_status[ichan] & I8257_SG_LAST) {
+                i8257_sg_end(d, ichan);
+            } else {
+                i8257_sg_fetch(d, ichan);
+            }
+        }
+        return;
+    }
 #ifdef DEBUG_DMA
     int dir, opmode;
 
@@ -424,12 +476,27 @@ static bool i8257_is_verify_transfer(I8257Regs *r)
     return (r->mode & 0x0c) == 0;
 }
 
+/*
+ * Where a channel's transfer starts in memory. Bit 31 of a DMA address
+ * (bit 7 of the high page) is dropped: on the PReP and BeBox boards RAM
+ * sits at PCI 0x80000000, and these addresses are PCI addresses.
+ */
+static hwaddr i8257_chan_addr(I8257State *d, int ichan)
+{
+    I8257Regs *r = &d->regs[ichan];
+
+    if (d->sg_status[ichan] & I8257_SG_ACTIVE) {
+        return d->sg_addr[ichan] & 0x7fffffff;
+    }
+    return ((r->pageh & 0x7f) << 24) | (r->page << 16) | r->now[ADDR];
+}
+
 static int i8257_dma_read_memory(IsaDma *obj, int nchan, void *buf, int pos,
                                  int len)
 {
     I8257State *d = I8257(obj);
     I8257Regs *r = &d->regs[nchan & 3];
-    hwaddr addr = ((r->pageh & 0x7f) << 24) | (r->page << 16) | r->now[ADDR];
+    hwaddr addr = i8257_chan_addr(d, nchan & 3);
 
     if (i8257_is_verify_transfer(r)) {
         /*
@@ -470,7 +537,7 @@ static int i8257_dma_write_memory(IsaDma *obj, int nchan, void *buf, int pos,
 {
     I8257State *s = I8257(obj);
     I8257Regs *r = &s->regs[nchan & 3];
-    hwaddr addr = ((r->pageh & 0x7f) << 24) | (r->page << 16) | r->now[ADDR];
+    hwaddr addr = i8257_chan_addr(s, nchan & 3);
 
     if (i8257_is_verify_transfer(r)) {
         return len;
@@ -649,6 +716,56 @@ static const MemoryRegionOps cont_io_ops = {
     },
 };
 
+void i8257_sg_command(I8257State *d, int ichan, uint8_t cmd)
+{
+    if (cmd & 0x40) {
+        /* bit 7 picks EOP (1) or IRQ13 (0) at the end of the list */
+        if (cmd & 0x80) {
+            d->sg_status[ichan] &= ~I8257_SG_IRQ13;
+        } else {
+            d->sg_status[ichan] |= I8257_SG_IRQ13;
+        }
+    }
+    switch (cmd & 3) {
+    case 1:                     /* start */
+        d->sg_irq &= ~(1 << ichan);
+        if (!d->sg_irq) {
+            qemu_irq_lower(d->sg_irq_out);
+        }
+        d->sg_status[ichan] &= I8257_SG_IRQ13;
+        d->sg_status[ichan] |= I8257_SG_ACTIVE;
+        i8257_sg_fetch(d, ichan);
+        i8257_dma_run(d);
+        break;
+    case 2:                     /* stop */
+        if (d->sg_status[ichan] & I8257_SG_ACTIVE) {
+            d->sg_status[ichan] &= ~(I8257_SG_ACTIVE | I8257_SG_CURRENT);
+            d->mask |= 1 << ichan;
+        }
+        break;
+    }
+}
+
+uint8_t i8257_sg_status(I8257State *d, int ichan)
+{
+    return d->sg_status[ichan];
+}
+
+void i8257_sg_set_pointer(I8257State *d, int ichan, uint32_t ptr)
+{
+    d->sg_ptr[ichan] = ptr;
+}
+
+uint32_t i8257_sg_get_pointer(I8257State *d, int ichan)
+{
+    return d->sg_ptr[ichan];
+}
+
+uint8_t i8257_sg_irq_status(I8257State *d)
+{
+    return d->sg_irq;
+}
+
 static const VMStateDescription vmstate_i8257_regs = {
     .name = "dma_regs",
     .version_id = 1,
@@ -703,6 +820,21 @@ static const VMStateDescription vmstate_i8257_ext_mode = {
     }
 };
 
+static const VMStateDescription vmstate_i8257_sg = {
+    .name = "dma/sg",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = i8257_eisa_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(sg_ptr, I8257State, 4),
+        VMSTATE_UINT32_ARRAY(sg_addr, I8257State, 4),
+        VMSTATE_UINT32_ARRAY(sg_len, I8257State, 4),
+        VMSTATE_UINT8_ARRAY(sg_status, I8257State, 4),
+        VMSTATE_UINT8(sg_irq, I8257State),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_i8257 = {
     .name = "dma",
     .version_id = 1,
@@ -720,6 +852,7 @@ static const VMStateDescription vmstate_i8257 = {
     .subsections = (const VMStateDescription * const []) {
         &vmstate_i8257_eisa,
         &vmstate_i8257_ext_mode,
+        &vmstate_i8257_sg,
         NULL
     }
 };
