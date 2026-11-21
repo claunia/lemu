@@ -31,6 +31,7 @@ chip; mkflash drops the "BOOT" tag in front of R4.5's:
 
 BeOS R5 brings no boot ROM; R4.5's boots it. Preview Release 2 carries
 its own (368 KiB, October 1997) in the BFS volume of its CD, see below.
+The first Preview Release brings none; PR2's boots it.
 
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
@@ -57,6 +58,9 @@ partition map; its BFS volume starts at 512-byte block 101245, byte
 
     tools/bin2iso.py "BeOS Preview Release 2.cue" beos-pr2.iso
     tools/bfs.py beos-pr2.iso@51837440 get /beos/etc/bebox_bootmain.image main.image
+
+The first Preview Release CD is laid out the same way, with its BFS
+volume at 512-byte block 43245, byte 22141440.
 
 `tools/bfs.py` lists and copies files from a BFS volume, read-only.
 
@@ -91,10 +95,16 @@ System (press and hold through the menus), mount it, and close
 DriveSetup. PR2 shows a wrong date, in December 1901 (and in 1916 with
 `-rtc base=1999-11-21`).
 
-`pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`, `run.cmd` and
-`README.txt` of ready-to-run kits: R3, R4.5 and R5 on IDE with a DEC
-21041, R4 on SCSI with an NE2000, Preview Release 2 on SCSI with a DEC
-21041.
+The first Preview Release installer has no way to DriveSetup: with no
+BFS volume it crashes in the kernel debugger when you click Begin.
+Initialize the disk with the PR2 CD's DriveSetup first; the Preview
+Release installer then offers to initialize it again, with its own
+format, and installs. It shows the same date in 1901.
+
+`pr/`, `pr2/`, `r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`,
+`run.cmd` and `README.txt` of ready-to-run kits: R3, R4.5 and R5 on IDE
+with a DEC 21041, R4 on SCSI with an NE2000, the Preview Release and
+Preview Release 2 on SCSI with a DEC 21041.
 
 ## Network
 
