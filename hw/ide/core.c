@@ -171,14 +171,22 @@ static void ide_identify(IDEState *s)
     put_le16(p + 49, (1 << 11) | (1 << 9) | (1 << 8)); /* DMA and LBA supported */
     put_le16(p + 51, 0x200); /* PIO transfer cycle */
     put_le16(p + 52, 0x200); /* DMA transfer cycle */
-    put_le16(p + 53, 1 | (1 << 1) | (1 << 2)); /* words 54-58,64-70,88 are valid */
+    if (s->no_udma) {
+        put_le16(p + 53, 1 | (1 << 1)); /* words 54-58,64-70 are valid */
+    } else {
+        put_le16(p + 53, 1 | (1 << 1) | (1 << 2)); /* words 54-58,64-70,88 are valid */
+    }
     ide_identify_chs(s);
     if (s->mult_sectors)
         put_le16(p + 59, 0x100 | s->mult_sectors);
     /* *(p + 60) := nb_sectors       -- see ide_identify_size */
     /* *(p + 61) := nb_sectors >> 16 -- see ide_identify_size */
     put_le16(p + 62, 0x07); /* single word dma0-2 supported */
-    put_le16(p + 63, 0x07); /* mdma0-2 supported */
+    if (s->no_udma) {
+        put_le16(p + 63, 0x07 | (1 << 10)); /* mdma2 set, mdma0-2 supported */
+    } else {
+        put_le16(p + 63, 0x07); /* mdma0-2 supported */
+    }
     put_le16(p + 64, 0x03); /* pio3-4 supported */
     put_le16(p + 65, 120);
     put_le16(p + 66, 120);
@@ -220,7 +228,9 @@ static void ide_identify(IDEState *s)
     } else {
         put_le16(p + 87, (1 << 14) | 0);
     }
-    put_le16(p + 88, 0x3f | (1 << 13)); /* udma5 set and supported */
+    if (!s->no_udma) {
+        put_le16(p + 88, 0x3f | (1 << 13)); /* udma5 set and supported */
+    }
     put_le16(p + 93, 1 | (1 << 14) | 0x2000);
     /* *(p + 100) := nb_sectors       -- see ide_identify_size */
     /* *(p + 101) := nb_sectors >> 16 -- see ide_identify_size */
@@ -1752,19 +1762,22 @@ static bool cmd_set_features(IDEState *s, uint8_t cmd)
             case 0x01: /* pio mode */
                 put_le16(identify_data + 62, 0x07);
                 put_le16(identify_data + 63, 0x07);
-                put_le16(identify_data + 88, 0x3f);
+                put_le16(identify_data + 88, s->no_udma ? 0 : 0x3f);
                 break;
             case 0x02: /* single word dma mode */
                 put_le16(identify_data + 62, 0x07 | (1 << (val + 8)));
                 put_le16(identify_data + 63, 0x07);
-                put_le16(identify_data + 88, 0x3f);
+                put_le16(identify_data + 88, s->no_udma ? 0 : 0x3f);
                 break;
             case 0x04: /* mdma mode */
                 put_le16(identify_data + 62, 0x07);
                 put_le16(identify_data + 63, 0x07 | (1 << (val + 8)));
-                put_le16(identify_data + 88, 0x3f);
+                put_le16(identify_data + 88, s->no_udma ? 0 : 0x3f);
                 break;
             case 0x08: /* udma mode */
+                if (s->no_udma) {
+                    goto abort_cmd;
+                }
                 put_le16(identify_data + 62, 0x07);
                 put_le16(identify_data + 63, 0x07);
                 put_le16(identify_data + 88, 0x3f | (1 << (val + 8)));
@@ -2642,6 +2655,7 @@ int ide_init_drive(IDEState *s, IDEDevice *dev, IDEDriveKind kind, Error **errp)
 
     blk_get_geometry(s->blk, &nb_sectors);
     s->win2k_install_hack = dev->win2k_install_hack;
+    s->no_udma = kind == IDE_HD && !dev->udma;
     if (kind == IDE_CD && dev->tracks &&
         !cdrom_parse_tracks(dev->tracks, &s->track_starts, &s->ntracks,
                             errp)) {

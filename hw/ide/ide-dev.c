@@ -198,6 +198,12 @@ static const Property ide_hd_properties[] = {
     DEFINE_PROP_BIOS_CHS_TRANS("bios-chs-trans",
                 IDEDrive, dev.chs_trans, BIOS_ATA_TRANSLATION_AUTO),
     DEFINE_PROP_UINT16("rotation_rate", IDEDrive, dev.rotation_rate, 0),
+    /*
+     * Off, the disk is one from before Ultra DMA, as in mid-1990s machines:
+     * it has no UDMA modes, and multiword DMA mode 2 is selected after
+     * reset instead of UDMA mode 5.
+     */
+    DEFINE_PROP_BOOL("udma", IDEDrive, dev.udma, true),
 };
 
 static void ide_hd_class_init(ObjectClass *klass, const void *data)
