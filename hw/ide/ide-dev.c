@@ -228,6 +228,8 @@ static const Property ide_cd_properties[] = {
     DEFINE_IDE_DEV_PROPERTIES(),
     /* "0:3402:160186": the block where each data track starts */
     DEFINE_PROP_STRING("tracks", IDEDrive, dev.tracks),
+    /* Off, a drive from before Ultra DMA, as for ide-hd */
+    DEFINE_PROP_BOOL("udma", IDEDrive, dev.udma, true),
 };
 
 static void ide_cd_class_init(ObjectClass *klass, const void *data)

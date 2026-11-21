@@ -281,9 +281,17 @@ static void ide_atapi_identify(IDEState *s)
     put_le16(p + 48, 1); /* dword I/O (XXX: should not be set on CDROM) */
 #ifdef USE_DMA_CDROM
     put_le16(p + 49, 1 << 9 | 1 << 8); /* DMA and LBA supported */
-    put_le16(p + 53, 7); /* words 64-70, 54-58, 88 valid */
+    if (s->no_udma) {
+        put_le16(p + 53, 3); /* words 64-70, 54-58 valid */
+    } else {
+        put_le16(p + 53, 7); /* words 64-70, 54-58, 88 valid */
+    }
     put_le16(p + 62, 7);  /* single word dma0-2 supported */
-    put_le16(p + 63, 7);  /* mdma0-2 supported */
+    if (s->no_udma) {
+        put_le16(p + 63, 0x07 | (1 << 10)); /* mdma2 set, mdma0-2 supported */
+    } else {
+        put_le16(p + 63, 7);  /* mdma0-2 supported */
+    }
 #else
     put_le16(p + 49, 1 << 9); /* LBA supported, no DMA */
     put_le16(p + 53, 3); /* words 64-70, 54-58 valid */
@@ -311,7 +319,9 @@ static void ide_atapi_identify(IDEState *s)
     }
 
 #ifdef USE_DMA_CDROM
-    put_le16(p + 88, 0x3f | (1 << 13)); /* udma5 set and supported */
+    if (!s->no_udma) {
+        put_le16(p + 88, 0x3f | (1 << 13)); /* udma5 set and supported */
+    }
     if (!s->ncq_queues) {
         /* word 93 is parallel ATA only, a SATA device reports zero */
         put_le16(p + 93, 0x600f);
@@ -2655,7 +2665,7 @@ int ide_init_drive(IDEState *s, IDEDevice *dev, IDEDriveKind kind, Error **errp)
 
     blk_get_geometry(s->blk, &nb_sectors);
     s->win2k_install_hack = dev->win2k_install_hack;
-    s->no_udma = kind == IDE_HD && !dev->udma;
+    s->no_udma = (kind == IDE_HD || kind == IDE_CD) && !dev->udma;
     if (kind == IDE_CD && dev->tracks &&
         !cdrom_parse_tracks(dev->tracks, &s->track_starts, &s->ntracks,
                             errp)) {
