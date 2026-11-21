@@ -398,5 +398,6 @@ scsi_generic_pr_state_preempt(uint64_t key, uint8_t resv_type) "key=0x%" PRIx64 
 # scsi-md.c
 scsi_md_command(uint32_t id, const char *cdb) "id %u cdb %s"
 scsi_md_check(uint8_t op, uint8_t key, uint8_t asc, uint8_t ascq) "opcode 0x%02x sense %x/%02x/%02x"
+scsi_md_utoc(const char *what, const char *path) "U-TOC %s %s"
 scsi_md_media(bool load) "medium %d"
 scsi_md_tray(bool open) "tray open %d"

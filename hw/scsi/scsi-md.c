@@ -29,6 +29,7 @@
 #include "migration/vmstate.h"
 #include "scsi/constants.h"
 #include "system/block-backend.h"
+#include "block/block_int-common.h"
 #include "hw/block/block.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
@@ -44,6 +45,18 @@ OBJECT_DECLARE_SIMPLE_TYPE(SCSIMDState, SCSI_MD)
 /* MD DATA discs hold 70464 logical blocks of 2048 bytes */
 #define MD_BLOCK_SIZE       2048
 #define MD_BLOCKS           70464
+
+/* TOC sectors are raw 2352-byte sectors without their sync and header */
+#define MD_TOC_SECTOR_SIZE  2336
+#define MD_UTOC_SECTORS     8
+#define MD_UTOC_SIZE        (MD_UTOC_SECTORS * MD_TOC_SECTOR_SIZE)
+
+/* Volume descriptor of the MiniDisc File System, 32 blocks into the data track */
+#define MD_VD_LBA           0x420
+/* Clusters of the system and data tracks */
+#define MD_FIRST_CLUSTER    50
+#define MD_DATA_CLUSTER     82
+#define MD_LEADOUT          2252
 
 #define MD_BUF_SIZE         (128 * KiB)
 #define MD_PAGE_LEN         16
@@ -90,6 +103,13 @@ static const uint8_t md_command_flags[0x100] = {
     [0x45] = MD_IMPLEMENTED | MD_CHECK_READY,   /* PLAY AUDIO (10) */
     [0x48] = MD_IMPLEMENTED | MD_CHECK_READY,   /* PLAY AUDIO TRACK/INDEX */
     [0x4b] = MD_IMPLEMENTED | MD_CHECK_READY,   /* PAUSE/RESUME */
+    [0xd1] = MD_IMPLEMENTED | MD_CHECK_READY,   /* Read U-TOC */
+    [0xd2] = MD_IMPLEMENTED | MD_CHECK_READY,   /* Write U-TOC */
+    [0xd4] = MD_IMPLEMENTED | MD_CHECK_READY,   /* Read P-TOC */
+    [0xd5] = MD_IMPLEMENTED | MD_CHECK_READY,   /* Format result */
+    [0xd6] = MD_IMPLEMENTED,                    /* Stop audio playback */
+    [0xd7] = MD_IMPLEMENTED,                    /* Audio play position */
+    [0xd8] = MD_IMPLEMENTED | MD_CHECK_READY,   /* Disc type */
 };
 
 typedef struct MDModel {
@@ -146,12 +166,17 @@ struct SCSIMDState {
     SCSIDevice qdev;
 
     char *model_name;
+    char *utoc_prop;
     const MDModel *model;
 
     bool tray_open;
     bool tray_locked;
     /* A disc went in: the next command gets a UNIT ATTENTION */
     bool media_changed;
+
+    /* The U-TOC is loaded on first use after a disc goes in */
+    bool utoc_valid;
+    uint8_t utoc[MD_UTOC_SIZE];
 
     uint8_t pages[MD_PAGES][MD_PAGE_LEN];
 };
@@ -191,6 +216,186 @@ static uint32_t md_blocks(SCSIMDState *s)
         return 0;
     }
     return MIN(len / MD_BLOCK_SIZE, MD_BLOCKS);
+}
+
+/* TOC */
+
+/* Packs a cluster, sector and sound group into a 24-bit TOC address */
+static void md_toc_address(uint8_t *p, uint32_t cluster, uint32_t sector,
+                           uint32_t sound_group)
+{
+    uint32_t addr = (cluster << 10) | (sector << 4) | sound_group;
+
+    p[0] = addr >> 16;
+    p[1] = addr >> 8;
+    p[2] = addr;
+}
+
+/* P-TOC sector 0 of a recordable MD DATA disc */
+static void md_build_ptoc(uint8_t *ptoc)
+{
+    memset(ptoc, 0, MD_TOC_SECTOR_SIZE);
+    memcpy(ptoc + 0x08, "MINX", 4);     /* MD DATA */
+    ptoc[0x0c] = 0x3e;                  /* Recordable disc */
+    ptoc[0x0d] = 0x0d;
+    ptoc[0x10] = MD_LEADOUT >> 8;       /* Lead-out cluster */
+    ptoc[0x11] = MD_LEADOUT & 0xff;
+    ptoc[0x13] = 0x01;                  /* Sectors in use: 0 */
+    ptoc[0x15] = 0x02;
+    ptoc[0x17] = 0x11;
+    ptoc[0x19] = 0x03;
+    ptoc[0x1d] = MD_FIRST_CLUSTER;      /* First recordable cluster */
+}
+
+/* The U-TOC written by Sony's formatters: a data track and a system track */
+static void md_build_formatted_utoc(uint8_t *utoc)
+{
+    memset(utoc, 0, MD_UTOC_SIZE);
+    utoc[0x0c] = 0x01;                  /* Maker */
+    utoc[0x0d] = 0x81;                  /* Model */
+    utoc[0x0e] = 1;                     /* First track */
+    utoc[0x0f] = 2;                     /* Last track */
+    utoc[0x13] = 0x01;                  /* Sectors in use: 0 */
+    utoc[0x1f] = 3;                     /* First empty part slot */
+    utoc[0x21] = 1;                     /* Track 1: part slot 1 */
+    utoc[0x22] = 2;                     /* Track 2: part slot 2 */
+
+    /* Slot 1: data track */
+    md_toc_address(utoc + 0x128, MD_DATA_CLUSTER, 0, 0);
+    utoc[0x12b] = 0xd0;
+    md_toc_address(utoc + 0x12c, MD_LEADOUT - 1, 31, 10);
+
+    /* Slot 2: system track */
+    md_toc_address(utoc + 0x130, MD_FIRST_CLUSTER, 0, 0);
+    utoc[0x133] = 0xdc;
+    md_toc_address(utoc + 0x134, MD_DATA_CLUSTER - 1, 31, 10);
+
+    /* Empty slots 3 to 255 are chained */
+    for (int i = 3; i < 255; i++) {
+        utoc[0x120 + 8 * i + 7] = i + 1;
+    }
+}
+
+/* The U-TOC of a blank disc, and the one a formatter writes first */
+static void md_build_cleared_utoc(uint8_t *utoc)
+{
+    memset(utoc, 0, MD_UTOC_SIZE);
+    utoc[0x13] = 0x01;
+}
+
+/* The path of the U-TOC of the disc, or NULL if it has none */
+static char *md_utoc_path(SCSIMDState *s)
+{
+    BlockDriverState *bs = blk_bs(s->qdev.conf.blk);
+    const char *fn, *slash, *dot;
+
+    if (s->utoc_prop && *s->utoc_prop) {
+        return g_strdup(s->utoc_prop);
+    }
+    if (!bs || !bs->filename[0] || g_str_has_prefix(bs->filename, "json:")) {
+        return NULL;
+    }
+
+    fn = bs->filename;
+    slash = strrchr(fn, '/');
+    dot = strrchr(slash ? slash : fn, '.');
+    if (dot && dot > (slash ? slash + 1 : fn)) {
+        return g_strdup_printf("%.*s.utoc.bin", (int)(dot - fn), fn);
+    }
+    return g_strdup_printf("%s.utoc.bin", fn);
+}
+
+static void md_utoc_load(SCSIMDState *s)
+{
+    g_autofree char *path = NULL;
+    g_autofree gchar *data = NULL;
+    gsize len = 0;
+    uint8_t vd[8];
+
+    if (s->utoc_valid) {
+        return;
+    }
+    s->utoc_valid = true;
+
+    path = md_utoc_path(s);
+    if (path && g_file_get_contents(path, &data, &len, NULL) &&
+        len >= MD_TOC_SECTOR_SIZE) {
+        memset(s->utoc, 0, sizeof(s->utoc));
+        memcpy(s->utoc, data, MIN(len, sizeof(s->utoc)));
+        trace_scsi_md_utoc("loaded", path);
+        return;
+    }
+
+    /* No U-TOC: a disc with an MDFS volume has the formatters' one */
+    if (md_blocks(s) > MD_VD_LBA &&
+        blk_pread(s->qdev.conf.blk, (int64_t)MD_VD_LBA * MD_BLOCK_SIZE,
+                  sizeof(vd), vd, 0) >= 0 &&
+        !memcmp(vd + 1, "MD001", 5)) {
+        md_build_formatted_utoc(s->utoc);
+        trace_scsi_md_utoc("made for an MDFS volume", path ? path : "");
+    } else {
+        md_build_cleared_utoc(s->utoc);
+        trace_scsi_md_utoc("made for a blank disc", path ? path : "");
+    }
+}
+
+static bool md_utoc_save(SCSIMDState *s)
+{
+    g_autofree char *path = md_utoc_path(s);
+    g_autoptr(GError) err = NULL;
+    int sectors = 1;
+
+    if (!path) {
+        /* Nowhere to keep it: it lasts until the disc goes out */
+        return true;
+    }
+
+    /* Keep the sectors in use */
+    for (int i = 1; i < MD_UTOC_SECTORS; i++) {
+        if (s->utoc[0x13] & (1 << i)) {
+            sectors = i + 1;
+        }
+    }
+
+    if (!g_file_set_contents(path, (const gchar *)s->utoc,
+                             sectors * MD_TOC_SECTOR_SIZE, &err)) {
+        error_report("scsi-md: cannot write the U-TOC: %s", err->message);
+        return false;
+    }
+    trace_scsi_md_utoc("saved", path);
+    return true;
+}
+
+/* The first logical block of the data track from the U-TOC, or -1 */
+static int32_t md_data_track_start(SCSIMDState *s)
+{
+    const uint8_t *utoc = s->utoc;
+    int first = utoc[0x0e];
+    int last = utoc[0x0f];
+
+    if (first == 0 || last < first) {
+        return -1;
+    }
+
+    for (int track = first; track <= last; track++) {
+        int part = utoc[0x20 + track];
+        const uint8_t *entry = utoc + 0x120 + 8 * part;
+        uint32_t addr, cluster, sector;
+
+        if (part == 0 || (entry[3] & 0x5c) != 0x50) {
+            continue;
+        }
+
+        addr = (entry[0] << 16) | (entry[1] << 8) | entry[2];
+        cluster = addr >> 10;
+        sector = (addr >> 4) & 0x3f;
+        if (cluster < MD_FIRST_CLUSTER || sector >= 32) {
+            continue;
+        }
+        return (cluster - MD_FIRST_CLUSTER) * 32 + sector;
+    }
+
+    return -1;
 }
 
 /* Sense */
@@ -478,6 +683,7 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
     case 0x45:  /* PLAY AUDIO (10): audio is not emulated */
     case 0x48:  /* PLAY AUDIO TRACK/INDEX */
     case 0x4b:  /* PAUSE/RESUME */
+    case 0xd6:  /* Stop audio playback */
         scsi_req_complete(&r->req, GOOD);
         return 0;
 
@@ -615,7 +821,8 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
             blk_eject(s->qdev.conf.blk, false);
             s->tray_open = false;
             s->media_changed = true;
-                    trace_scsi_md_tray(false);
+            s->utoc_valid = false;
+            trace_scsi_md_tray(false);
         }
         scsi_req_complete(&r->req, GOOD);
         return 0;
@@ -626,6 +833,56 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
         scsi_req_complete(&r->req, GOOD);
         return 0;
 
+    case 0xd1: /* Read U-TOC sectors */
+        if (cdb[5] >= MD_UTOC_SECTORS) {
+            return md_invalid_field(r, 5);
+        }
+        md_utoc_load(s);
+        buf = md_alloc_buf(r, (MD_UTOC_SECTORS - cdb[5]) * MD_TOC_SECTOR_SIZE);
+        memcpy(buf, s->utoc + cdb[5] * MD_TOC_SECTOR_SIZE,
+               (MD_UTOC_SECTORS - cdb[5]) * MD_TOC_SECTOR_SIZE);
+        return md_data_in(r, (MD_UTOC_SECTORS - cdb[5]) * MD_TOC_SECTOR_SIZE);
+
+    case 0xd2: /* Write U-TOC sectors */
+        if (md_read_only(s)) {
+            return md_write_protected(r);
+        }
+        if (cdb[5] >= MD_UTOC_SECTORS) {
+            return md_invalid_field(r, 5);
+        }
+        if (r->req.cmd.xfer == 0) {
+            scsi_req_complete(&r->req, GOOD);
+            return 0;
+        }
+        return md_data_out(r);
+
+    case 0xd4: /* Read a P-TOC sector: recordable discs only have sector 0 */
+        if (cdb[5] != 0) {
+            return md_invalid_field(r, 5);
+        }
+        md_build_ptoc(md_alloc_buf(r, MD_TOC_SECTOR_SIZE));
+        return md_data_in(r, MD_TOC_SECTOR_SIZE);
+
+    case 0xd5: /* Result of the last format: no defect entries */
+        md_alloc_buf(r, MAX(r->req.cmd.xfer, 4));
+        return md_data_in(r, MAX(r->req.cmd.xfer, 4));
+
+    case 0xd7: /* Audio play position: not playing */
+        md_alloc_buf(r, 4);
+        return md_data_in(r, 4);
+
+    case 0xd8: /* Disc type: 01h and the first block of the data track */
+        md_utoc_load(s);
+        start = md_data_track_start(s);
+        buf = md_alloc_buf(r, 8);
+        if (start < 0) {
+            buf[0] = 0xff;
+        } else {
+            buf[0] = 0x01;
+            stl_be_p(buf + 4, start);
+        }
+        return md_data_in(r, 8);
+
     default:
         return md_check(r, MD_SK_ILLEGAL_REQUEST, 0x20, 0, 0, false, 0, NULL);
     }
@@ -635,10 +892,23 @@ static int32_t md_send_command(SCSIRequest *req, uint8_t *cdb)
 static void md_emulate_write_done(SCSIMDReq *r, SCSIMDState *s)
 {
     const uint8_t *cdb = r->req.cmd.buf;
+    uint32_t len;
 
     switch (cdb[0]) {
     case MODE_SELECT:
         md_mode_select(r, s);
+        break;
+
+    case 0xd2:
+        len = MIN(r->req.cmd.xfer,
+                  (MD_UTOC_SECTORS - cdb[5]) * MD_TOC_SECTOR_SIZE);
+        md_utoc_load(s);
+        memcpy(s->utoc + cdb[5] * MD_TOC_SECTOR_SIZE, r->buf, len);
+        if (!md_utoc_save(s)) {
+            md_check(r, MD_SK_MEDIUM_ERROR, 0x0c, 0, 0, false, 0, NULL);
+            break;
+        }
+        scsi_req_complete(&r->req, GOOD);
         break;
 
     default:
@@ -842,11 +1112,31 @@ static SCSIRequest *md_new_request(SCSIDevice *d, uint32_t tag, uint32_t lun,
     return scsi_req_alloc(&md_reqops, d, tag, lun, hba_private);
 }
 
-/* The audio commands move no data, whatever their length fields say */
+/*
+ * The vendor commands (C0h to FFh) are 10 bytes long, with the
+ * allocation or parameter list length in bytes 7 and 8.
+ */
 static int md_parse_cdb(SCSIDevice *dev, SCSICommand *cmd, uint8_t *buf,
                         size_t buf_len, void *hba_private)
 {
     int ret;
+
+    if (buf[0] >= 0xc0) {
+        if (buf_len < 10) {
+            return -1;
+        }
+        cmd->len = 10;
+        cmd->xfer = lduw_be_p(&buf[7]);
+        cmd->lba = -1;
+        memcpy(cmd->buf, buf, 10);
+        if (!cmd->xfer || buf[0] == 0xd6) {
+            cmd->xfer = 0;
+            cmd->mode = SCSI_XFER_NONE;
+        } else {
+            cmd->mode = buf[0] == 0xd2 ? SCSI_XFER_TO_DEV : SCSI_XFER_FROM_DEV;
+        }
+        return 0;
+    }
 
     ret = scsi_req_parse_cdb(dev, cmd, buf, buf_len);
     if (ret) {
@@ -876,6 +1166,7 @@ static void md_change_media_cb(void *opaque, bool load, Error **errp)
 
     s->media_changed = load;
     s->tray_open = !load;
+    s->utoc_valid = false;
     trace_scsi_md_media(load);
 }
 
@@ -933,7 +1224,8 @@ static void md_reset(DeviceState *dev)
     if (s->tray_open) {
         s->tray_open = false;
         s->media_changed = true;
-        }
+        s->utoc_valid = false;
+    }
     s->tray_locked = false;
     memcpy(s->pages, s->model->pages, sizeof(s->pages));
 }
@@ -994,6 +1286,8 @@ static const VMStateDescription vmstate_scsi_md = {
         VMSTATE_BOOL(tray_open, SCSIMDState),
         VMSTATE_BOOL(tray_locked, SCSIMDState),
         VMSTATE_BOOL(media_changed, SCSIMDState),
+        VMSTATE_BOOL(utoc_valid, SCSIMDState),
+        VMSTATE_BUFFER(utoc, SCSIMDState),
         VMSTATE_UINT8_2DARRAY(pages, SCSIMDState, MD_PAGES, MD_PAGE_LEN),
         VMSTATE_END_OF_LIST()
     }
@@ -1002,6 +1296,7 @@ static const VMStateDescription vmstate_scsi_md = {
 static const Property scsi_md_properties[] = {
     DEFINE_PROP_DRIVE("drive", SCSIMDState, qdev.conf.blk),
     DEFINE_PROP_STRING("model", SCSIMDState, model_name),
+    DEFINE_PROP_STRING("utoc", SCSIMDState, utoc_prop),
     DEFINE_BLOCK_ERROR_PROPERTIES(SCSIMDState, qdev.conf),
 };
 
