@@ -94,6 +94,13 @@ The CS4231A plays through QEMU's default audio backend, or the one named
 with `-M bebox,audiodev=ID`. BeOS's driver plays on DMA 6 and records on
 DMA 7; QEMU's codec only plays, so there is no recording.
 
+The clock keeps the last two digits of the year, as the bq3285 does.
+Disks installed with an older LEMU, whose clock said 2046, have file
+dates past 2038, and R4.5's media kit then finds no file readers: no
+sound file plays. Fix such a disk once in a Terminal:
+
+    find /boot -xdev -print0 | xargs -0 touch -c
+
 ## Known problems
 
 - BeOS's own Restart and the installer's Quit go back to the boot
