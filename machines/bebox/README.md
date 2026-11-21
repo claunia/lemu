@@ -29,6 +29,8 @@ chip; mkflash drops the "BOOT" tag in front of R4.5's:
     tools/bfs.py beos-r3.iso@32856s get /beos/etc/bebox_bootmain.image main.image
     tools/mkflash.py bootnub.rom main.image flash-r3.bin
 
+BeOS R5 brings no boot ROM; R4.5's boots it.
+
 The flash chip follows the image size: 128 KiB is an Am29F010, 512 KiB an
 Am29F040.
 
@@ -68,13 +70,16 @@ A SCSI disk on the 53C810 and an IDE disk on the 82091AA both work:
 R3 mounts a CD put in after boot with `mountvolume -r -all` in a
 Terminal.
 
-BeOS reads and writes the IDE disk with DMA: the drive's DMA request is
-wired to ISA DMA channel 5, and the 82378 moves the data with its
-scatter-gather lists.
+BeOS reads and writes the IDE disk and the IDE CD with DMA: the drive's
+DMA request is wired to ISA DMA channel 5, and the 82378 moves the data
+with its scatter-gather lists.
 
-`r3/`, `r4/` and `r45/` have the `run.sh`, `run.cmd` and `README.txt` of
-ready-to-run kits: R3 and R4.5 on IDE with a DEC 21041, R4 on SCSI with
-an NE2000.
+R5 installs the same way, with the R4.5 boot flash. With the optional
+software it takes about 270 MB: give it a 2 GiB disk.
+
+`r3/`, `r4/`, `r45/` and `r5/` have the `run.sh`, `run.cmd` and
+`README.txt` of ready-to-run kits: R3, R4.5 and R5 on IDE with a DEC
+21041, R4 on SCSI with an NE2000.
 
 ## Network
 
@@ -93,6 +98,13 @@ DHCP requests here with either card, only ARP requests for 0.0.128.0.
 The CS4231A plays through QEMU's default audio backend, or the one named
 with `-M bebox,audiodev=ID`. BeOS's driver plays on DMA 6 and records on
 DMA 7; QEMU's codec only plays, so there is no recording.
+
+BeOS R5's audio output drops a buffer that comes even a little late.
+Under plain TCG the guest's clock does not match the work the emulated
+CPUs get done (the kernel measures them at 715 MHz), every buffer comes a
+few hundred microseconds late, and R5 plays silence. With
+`-icount shift=3,sleep=on` the guest's clock follows the instructions it
+runs, about 125 MHz, and R5 plays sound. The R5 kit runs that way.
 
 The clock keeps the last two digits of the year, as the bq3285 does.
 Disks installed with an older LEMU, whose clock said 2046, have file
