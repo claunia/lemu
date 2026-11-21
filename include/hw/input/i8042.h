@@ -2,6 +2,7 @@
  * QEMU PS/2 Controller
  *
  * Copyright (c) 2003 Fabrice Bellard
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * SPDX-License-Identifier: MIT
  */

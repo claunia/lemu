@@ -2,6 +2,7 @@
  * QEMU Crystal CS4231 audio chip emulation
  *
  * Copyright (c) 2006 Fabrice Bellard
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal

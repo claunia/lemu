@@ -2,6 +2,7 @@
  *  PowerPC exception emulation helpers for QEMU.
  *
  *  Copyright (c) 2003-2007 Jocelyn Mayer
+ *  Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

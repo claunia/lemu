@@ -2,6 +2,7 @@
  * QEMU TULIP Emulation
  *
  * Copyright (c) 2019 Sven Schnelle <svens@stackframe.org>
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  */

@@ -12,6 +12,8 @@
  *  2009-Oct-13 Artyom Tarasenko : implemented the block descriptor in the
  *                                 MODE SENSE response.
  *
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+ *
  * This code is licensed under the LGPL.
  *
  * Note that this file only handles the SCSI architecture model and device
