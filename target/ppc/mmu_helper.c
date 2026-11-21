@@ -343,10 +343,23 @@ void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
     } else
 #endif /* defined(TARGET_PPC64) */
     switch (env->mmu_model) {
-    case POWERPC_MMU_SOFT_6xx:
-        ppc6xx_tlb_invalidate_virt(env, addr, 0);
-        ppc6xx_tlb_invalidate_virt(env, addr, 1);
+    case POWERPC_MMU_SOFT_6xx: {
+        CPUState *cs;
+
+        /*
+         * tlbie goes out on the 60x bus, and the other 603s on it drop the
+         * page too (TLBISYNC then tells when they have).
+         */
+        CPU_FOREACH(cs) {
+            CPUPPCState *other = cpu_env(cs);
+
+            if (other->mmu_model == POWERPC_MMU_SOFT_6xx) {
+                ppc6xx_tlb_invalidate_virt(other, addr, 0);
+                ppc6xx_tlb_invalidate_virt(other, addr, 1);
+            }
+        }
         break;
+    }
     case POWERPC_MMU_32B:
         /*
          * Actual CPUs invalidate entire congruence classes based on
