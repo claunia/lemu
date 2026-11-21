@@ -21,6 +21,7 @@
 #include "qemu/units.h"
 #include "qemu/datadir.h"
 #include "qemu/error-report.h"
+#include "system/qtest.h"
 #include "qemu/timer.h"
 #include "qapi/error.h"
 #include "hw/core/boards.h"
@@ -244,15 +245,18 @@ static void bebox_init_flash(MachineState *machine)
         MemoryRegion *rom = g_new(MemoryRegion, 1);
         uint32_t at;
 
-        if (!filename) {
+        if (!filename && !qtest_enabled()) {
             error_report("bebox: no boot ROM, give the flash with -drive "
                          "if=pflash or -bios (see machines/bebox/README.md)");
             exit(1);
         }
-        chip = bebox_flash_chip(get_image_size(filename, NULL), false);
+        /* qtest starts every machine without firmware: map an empty ROM */
+        chip = filename ? bebox_flash_chip(get_image_size(filename, NULL),
+                                           false)
+                        : &bebox_flash_chips[0];
         memory_region_init_rom(rom, NULL, "bebox.rom", chip->size,
                                &error_fatal);
-        if (load_image_mr(filename, rom) < 0) {
+        if (filename && load_image_mr(filename, rom) < 0) {
             error_report("bebox: could not load boot ROM '%s'", filename);
             exit(1);
         }
