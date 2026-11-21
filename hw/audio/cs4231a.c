@@ -573,16 +573,28 @@ static int cs_write_audio (CSState *s, int nchan, int dma_pos,
 static int cs_dma_read (void *opaque, int nchan, int dma_pos, int dma_len)
 {
     CSState *s = opaque;
+    IsaDmaClass *k = ISADMA_GET_CLASS(s->isa_dma);
+    bool autoinit = k->has_autoinitialization(s->isa_dma, nchan);
     int copy, written;
     int till = -1;
 
     copy = s->voice ? (s->audio_free >> (s->tab != NULL)) : dma_len;
 
     if (s->dregs[Pin_Control] & IEN) {
-        till = (s->dregs[Playback_Lower_Base_Count]
-            | (s->dregs[Playback_Upper_Base_Count] << 8)) << s->shift;
+        /* the base count holds the number of samples less one */
+        till = ((s->dregs[Playback_Lower_Base_Count]
+                 | (s->dregs[Playback_Upper_Base_Count] << 8)) + 1)
+               << s->shift;
         till -= s->transferred;
         copy = MIN (till, copy);
+    }
+
+    /*
+     * Without autoinitialization the DMA channel stops at terminal count
+     * until the driver gives it the next buffer: don't go round again.
+     */
+    if (!autoinit) {
+        copy = MIN (copy, dma_len - dma_pos);
     }
 
     if ((copy <= 0) || (dma_len <= 0)) {
@@ -591,7 +603,10 @@ static int cs_dma_read (void *opaque, int nchan, int dma_pos, int dma_len)
 
     written = cs_write_audio (s, nchan, dma_pos, dma_len, copy);
 
-    dma_pos = (dma_pos + written) % dma_len;
+    dma_pos += written;
+    if (autoinit) {
+        dma_pos %= dma_len;
+    }
     s->audio_free -= (written << (s->tab != NULL));
 
     if (written == till) {
