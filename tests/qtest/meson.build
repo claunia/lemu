@@ -372,6 +372,7 @@ qos_test_ss.add(
   'virtio-net-test.c',
   'virtio-rng-test.c',
   'virtio-scsi-test.c',
+  'scsi-md-test.c',
   'virtio-iommu-test.c',
   'vmxnet3-test.c',
   'igb-test.c',
