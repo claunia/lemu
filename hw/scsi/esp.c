@@ -469,8 +469,16 @@ static bool esp_cdb_ready(ESPState *s)
     }
 
     cdblen = scsi_cdb_length((uint8_t *)&pbuf[s->cmdfifo_cdb_offset]);
+    if (cdblen < 0) {
+        /*
+         * Groups 3, 6 and 7 have no standard length. Most vendor commands
+         * in them are 10 bytes long; without a length the command would
+         * never run.
+         */
+        cdblen = 10;
+    }
 
-    return cdblen < 0 ? false : (len >= cdblen);
+    return len >= cdblen;
 }
 
 static void esp_dma_ti_check(ESPState *s)
