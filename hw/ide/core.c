@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2003 Fabrice Bellard
  * Copyright (c) 2006 Openedhand Ltd.
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1406,6 +1407,7 @@ static void ide_reset(IDEState *s, IDEResetKind kind)
     /* ATAPI specific */
     s->sense_key = 0;
     s->asc = 0;
+    s->ua_reported = false;
     s->cdrom_changed = 0;
     s->packet_transfer_size = 0;
     s->elementary_transfer_size = 0;

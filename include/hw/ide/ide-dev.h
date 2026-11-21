@@ -2,6 +2,7 @@
  * ide device definitions
  *
  * Copyright (c) 2009 Gerd Hoffmann <kraxel@redhat.com>
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This code is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -66,6 +67,7 @@ struct IDEState {
     char drive_serial_str[21];
     char drive_model_str[41];
     bool win2k_install_hack;
+    bool ua_reported;           /* the pending unit attention was reported */
     uint64_t wwn;
     /* ide regs */
     uint8_t feature;
