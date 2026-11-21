@@ -193,8 +193,11 @@ static uint64_t mpc105_io_read(void *opaque, hwaddr addr, unsigned size)
     MPC105State *s = opaque;
     uint8_t buf[4];
 
-    address_space_read(&s->pci_io_as, mpc105_io_address(s, addr),
-                       MEMTXATTRS_UNSPECIFIED, buf, size);
+    /* Nobody answers on ISA: the bus floats high */
+    if (address_space_read(&s->pci_io_as, mpc105_io_address(s, addr),
+                           MEMTXATTRS_UNSPECIFIED, buf, size) != MEMTX_OK) {
+        return MAKE_64BIT_MASK(0, size * 8);
+    }
     switch (size) {
     case 1:
         return buf[0];
