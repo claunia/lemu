@@ -49,9 +49,25 @@ static ESPState *next_scsi_esp(NeXTSCSIState *s)
     return &s->esp.esp;
 }
 
+/*
+ * The real ESP takes a little while to finish a command; QEMU's raises its
+ * interrupt inside the register write that started it. NeXT drivers note
+ * what they started after that write, so the interrupt reaches the CPU
+ * after it, as in Previous (about 100 CPU cycles).
+ */
+#define NEXT_SCSI_IRQ_DELAY_NS 4000
+
 static void next_scsi_update_irq(NeXTSCSIState *s)
 {
-    qemu_set_irq(s->irq, s->esp_irq && (s->control & ESPCTRL_ENABLE_INT));
+    qemu_set_irq(s->irq, s->esp_irq_out && (s->control & ESPCTRL_ENABLE_INT));
+}
+
+static void next_scsi_irq_timer(void *opaque)
+{
+    NeXTSCSIState *s = opaque;
+
+    s->esp_irq_out = s->esp_irq;
+    next_scsi_update_irq(s);
 }
 
 static void next_scsi_esp_irq(void *opaque, int n, int level)
@@ -59,7 +75,16 @@ static void next_scsi_esp_irq(void *opaque, int n, int level)
     NeXTSCSIState *s = opaque;
 
     s->esp_irq = level;
-    next_scsi_update_irq(s);
+    if (level) {
+        if (!s->esp_irq_out && !timer_pending(s->irq_timer)) {
+            timer_mod(s->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                      NEXT_SCSI_IRQ_DELAY_NS);
+        }
+    } else {
+        timer_del(s->irq_timer);
+        s->esp_irq_out = false;
+        next_scsi_update_irq(s);
+    }
 }
 
 /* Bytes the device side has for memory */
@@ -458,6 +483,7 @@ static void next_scsi_realize(DeviceState *dev, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(sysbus_esp), 0,
                        qdev_get_gpio_in_named(dev, "esp-irq", 0));
 
+    s->irq_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, next_scsi_irq_timer, s);
     next_dma_set_client(s->dma, NEXT_DMA_SCSI, next_scsi_dma_kick,
                         next_scsi_dma_initbuf, s);
 
@@ -474,6 +500,10 @@ static void next_scsi_reset_hold(Object *obj, ResetType type)
     s->buf_limit = 0;
     s->q_head = s->q_len = 0;
     s->esp_dma = false;
+    s->esp_irq_out = false;
+    if (s->irq_timer) {
+        timer_del(s->irq_timer);
+    }
 }
 
 static const VMStateDescription next_scsi_vmstate = {
@@ -485,6 +515,8 @@ static const VMStateDescription next_scsi_vmstate = {
         VMSTATE_UINT8(status, NeXTSCSIState),
         VMSTATE_BOOL(esp_irq, NeXTSCSIState),
         VMSTATE_BOOL(esp_dma, NeXTSCSIState),
+        VMSTATE_BOOL(esp_irq_out, NeXTSCSIState),
+        VMSTATE_TIMER_PTR(irq_timer, NeXTSCSIState),
         VMSTATE_UINT32(q_head, NeXTSCSIState),
         VMSTATE_UINT32(q_len, NeXTSCSIState),
         VMSTATE_UINT8_ARRAY(q, NeXTSCSIState, NEXT_SCSI_QUEUE),

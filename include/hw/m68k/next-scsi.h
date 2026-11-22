@@ -15,6 +15,7 @@
 #include "hw/core/sysbus.h"
 #include "hw/scsi/esp.h"
 #include "hw/dma/next-dma.h"
+#include "qemu/timer.h"
 #include "qom/object.h"
 
 #define TYPE_NEXT_SCSI "next-scsi"
@@ -45,6 +46,8 @@ struct NeXTSCSIState {
     uint8_t control;
     uint8_t status;
     bool esp_irq;
+    bool esp_irq_out;
+    QEMUTimer *irq_timer;
     bool esp_dma;
 
     /* bytes from the ESP waiting for the channel */
