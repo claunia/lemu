@@ -19,6 +19,7 @@ config NEXTCUBE
     select FRAMEBUFFER
     select ESCC
     select EMPTY_SLOT
+    select ESP
 
 config Q800
     bool
