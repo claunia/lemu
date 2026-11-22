@@ -106,6 +106,7 @@ struct NeXTPC {
     QEMUTimer *hardclock_timer;
 
     int64_t eventc_offset;
+    uint32_t eventc_latch;
 
     QEMUTimer *vbl_timer;
 
@@ -481,13 +482,19 @@ static const MemoryRegionOps next_hardclock_ops = {
     .endianness = DEVICE_BIG_ENDIAN,
 };
 
-/* Event counter: 0x0201a000, 20 bits of microseconds */
+/*
+ * Event counter: 0x0201a000, 20 bits of microseconds. Reading the first
+ * byte latches the count, and the other bytes read the latched value, so
+ * that software can read it a byte at a time.
+ */
 static uint64_t next_eventc_read(void *opaque, hwaddr addr, unsigned size)
 {
     NeXTPC *s = opaque;
-    uint32_t val = (next_us() - s->eventc_offset) & 0xFFFFF;
 
-    return extract32(val, (4 - (addr & 3) - size) * 8, size * 8);
+    if ((addr & 3) == 0) {
+        s->eventc_latch = (next_us() - s->eventc_offset) & 0xFFFFF;
+    }
+    return extract32(s->eventc_latch, (4 - (addr & 3) - size) * 8, size * 8);
 }
 
 static void next_eventc_write(void *opaque, hwaddr addr, uint64_t val,
@@ -779,8 +786,8 @@ static int next_pc_post_load(void *opaque, int version_id)
 
 static const VMStateDescription next_pc_vmstate = {
     .name = "next-pc",
-    .version_id = 5,
-    .minimum_version_id = 5,
+    .version_id = 6,
+    .minimum_version_id = 6,
     .post_load = next_pc_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(scr1, NeXTPC),
@@ -798,6 +805,7 @@ static const VMStateDescription next_pc_vmstate = {
         VMSTATE_INT64(hardclock_last, NeXTPC),
         VMSTATE_TIMER_PTR(hardclock_timer, NeXTPC),
         VMSTATE_INT64(eventc_offset, NeXTPC),
+        VMSTATE_UINT32(eventc_latch, NeXTPC),
         VMSTATE_TIMER_PTR(vbl_timer, NeXTPC),
         VMSTATE_UINT32_ARRAY(bmap, NeXTPC, 16),
         VMSTATE_END_OF_LIST()
