@@ -439,6 +439,11 @@ static void next_fdc_execute(NeXTFDCState *s)
         break;
     case CMD_CONFIGURE:
         s->eis = s->cmd_data[1] & 0x40;
+        if (s->cmd_data[1] & 0x10) {
+            /* polling off: no poll interrupt after the reset */
+            timer_del(s->timer);
+            s->io_state = FLP_STATE_DONE;
+        }
         s->msr |= MSR_RQM;
         break;
     case CMD_READ_ID:
