@@ -48,6 +48,8 @@
 #include "hw/input/next-kms.h"
 #include "hw/block/next-mo.h"
 #include "hw/block/next-fdc.h"
+#include "hw/audio/next-dsp.h"
+#include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
 #include "qapi/error.h"
 #include "qom/object.h"
@@ -959,6 +961,8 @@ struct NeXTState {
     NeXTKMSState kms;
     NeXTMOState mo;
     NeXTFDCState fdc;
+    NeXTDSPState dsp;
+    NeXTPrinterState printer;
     ESCCState escc;
     NeXTPC pc;
 
@@ -1274,6 +1278,23 @@ static void next_machine_init(MachineState *machine)
         sysbus_connect_irq(SYS_BUS_DEVICE(&m->fdc), 0,
                            qdev_get_gpio_in(dev, NEXT_INT_PHONE));
     }
+
+    /* DSP */
+    object_initialize_child(OBJECT(m), "dsp", &m->dsp, TYPE_NEXT_DSP);
+    sysbus_realize(SYS_BUS_DEVICE(&m->dsp), &error_fatal);
+    memory_region_add_subregion(&m->io, NEXT_IO_DSP,
+                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->dsp), 0));
+
+    /* Laser printer port */
+    object_initialize_child(OBJECT(m), "printer", &m->printer,
+                            TYPE_NEXT_PRINTER);
+    object_property_set_link(OBJECT(&m->printer), "dma", OBJECT(&m->dma),
+                             &error_abort);
+    sysbus_realize(SYS_BUS_DEVICE(&m->printer), &error_fatal);
+    memory_region_add_subregion(&m->io, NEXT_IO_PRINTER,
+                    sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->printer), 0));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&m->printer), 0,
+                       qdev_get_gpio_in(dev, NEXT_INT_PRINTER));
 
     /* Keyboard, mouse and sound */
     object_initialize_child(OBJECT(m), "kms", &m->kms, TYPE_NEXT_KMS);
