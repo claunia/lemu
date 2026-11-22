@@ -3,6 +3,7 @@
  *
  *  Copyright (c) 2005-2007 CodeSourcery
  *  Written by Paul Brook
+ *  Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -107,6 +108,7 @@ typedef struct CPUArchState {
 
     FPReg fregs[8];
     FPReg fp_result;
+    uint32_t fp_packed[3];  /* a packed decimal operand being stored */
     uint32_t fpcr;
     uint32_t fpsr;
     float_status fp_status;
@@ -168,6 +170,9 @@ struct ArchCPU {
     CPUState parent_obj;
 
     CPUM68KState env;
+
+    /* M68K_FEATURE_FPU_PACKED: on, off, or as the model has it */
+    OnOffAuto packed_decimal;
 };
 
 /*
@@ -559,6 +564,11 @@ enum m68k_features {
     M68K_FEATURE_EXCEPTION_FORMAT_VEC,
     /* LINK.L (680[2346]0, and CPU32) */
     M68K_FEATURE_LINKL,
+    /*
+     * Packed decimal reals done by the FPU (68881/68882); the 68040 and
+     * 68060 trap to their FPSP for them (unimplemented data type)
+     */
+    M68K_FEATURE_FPU_PACKED,
 };
 
 static inline bool m68k_feature(CPUM68KState *env, int feature)
