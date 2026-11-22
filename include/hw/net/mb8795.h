@@ -50,6 +50,8 @@ struct MB8795State {
     bool tpe_select;
     bool rx_chain;
     bool in_tick;
+    bool bootp_pending;     /* a NeXT BOOTP request went out */
+    uint32_t bootp_xid;
     int32_t recv_state;
     int32_t wire;
 

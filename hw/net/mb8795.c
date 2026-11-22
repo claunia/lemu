@@ -236,15 +236,108 @@ static int mb8795_wire(MB8795State *s)
     return EN_DISCONNECTED;
 }
 
+/* ---- BOOTP for NeXT clients ---- */
+
+#define BOOTP_SERVER_PORT   67
+#define BOOTP_CLIENT_PORT   68
+#define BOOTP_VEND          236     /* vendor area in the BOOTP packet */
+#define NEXT_VEND_LEN       64
+
+static const uint8_t next_vend_magic[4] = { 'N', 'e', 'X', 'T' };
+static const uint8_t rfc1048_magic[4] = { 0x63, 0x82, 0x53, 0x63 };
+
+/*
+ * Find the BOOTP packet in an Ethernet frame going from port sport to
+ * port dport, and return where it starts, or NULL.
+ */
+static uint8_t *mb8795_bootp(uint8_t *pkt, size_t len, uint16_t sport,
+                             uint16_t dport)
+{
+    size_t ihl;
+    uint8_t *udp;
+
+    if (len < 14 + 20 || lduw_be_p(pkt + 12) != 0x0800 ||
+        (pkt[14] >> 4) != 4 || pkt[14 + 9] != 17) {
+        return NULL;
+    }
+    ihl = (pkt[14] & 0xF) * 4;
+    if (ihl < 20 || len < 14 + ihl + 8 + BOOTP_VEND + NEXT_VEND_LEN) {
+        return NULL;
+    }
+    udp = pkt + 14 + ihl;
+    if (lduw_be_p(udp) != sport || lduw_be_p(udp + 2) != dport) {
+        return NULL;
+    }
+    return udp + 8;
+}
+
+/*
+ * NeXTSTEP asks for its address with BOOTP and the vendor magic "NeXT",
+ * and takes only an answer in the same form. QEMU's user network answers
+ * with DHCP options instead, so put a NeXT vendor area in their place:
+ * version 1, opcode 0 (it worked) and no text. Previous's own BOOTP
+ * server answers the same way.
+ */
+static void mb8795_note_bootp(MB8795State *s, uint8_t *pkt, size_t len)
+{
+    uint8_t *bp = mb8795_bootp(pkt, len, BOOTP_CLIENT_PORT,
+                               BOOTP_SERVER_PORT);
+
+    if (bp && bp[0] == 1 &&
+        !memcmp(bp + BOOTP_VEND, next_vend_magic, 4)) {
+        s->bootp_pending = true;
+        s->bootp_xid = ldl_be_p(bp + 4);
+    }
+}
+
+/* Returns the new length of the packet */
+static size_t mb8795_fix_bootp(MB8795State *s, uint8_t *pkt, size_t len)
+{
+    uint8_t *bp, *ip = pkt + 14;
+    size_t ihl = (ip[0] & 0xF) * 4;
+    uint32_t sum = 0;
+
+    if (!s->bootp_pending) {
+        return len;
+    }
+    bp = mb8795_bootp(pkt, len, BOOTP_SERVER_PORT, BOOTP_CLIENT_PORT);
+    if (!bp || bp[0] != 2 || ldl_be_p(bp + 4) != s->bootp_xid ||
+        memcmp(bp + BOOTP_VEND, rfc1048_magic, 4)) {
+        return len;
+    }
+    /* a BOOTP packet of the old size, 300 bytes */
+    memset(bp + BOOTP_VEND, 0, NEXT_VEND_LEN);
+    memcpy(bp + BOOTP_VEND, next_vend_magic, 4);
+    bp[BOOTP_VEND + 4] = 1;     /* version */
+    stw_be_p(bp - 8 + 4, 8 + BOOTP_VEND + NEXT_VEND_LEN);   /* UDP length */
+    stw_be_p(bp - 8 + 6, 0);    /* no UDP checksum */
+    stw_be_p(ip + 2, ihl + 8 + BOOTP_VEND + NEXT_VEND_LEN);
+    stw_be_p(ip + 10, 0);
+    for (size_t i = 0; i < ihl; i += 2) {
+        sum += lduw_be_p(ip + i);
+    }
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    stw_be_p(ip + 10, ~sum);
+    return 14 + ihl + 8 + BOOTP_VEND + NEXT_VEND_LEN;
+}
+
 static void mb8795_send(MB8795State *s, int wire)
 {
+    mb8795_note_bootp(s, s->tx_buf, s->tx_size);
     if (wire == EN_LOOPBACK) {
         mb8795_take_packet(s, s->tx_buf, s->tx_size);
     } else {
-        qemu_send_packet(qemu_get_queue(s->nic), s->tx_buf, s->tx_size);
-        if (wire == EN_THINWIRE) {
+        /*
+         * On thin wire the machine hears its own packet as it goes out,
+         * before any answer: an answer can come back at once, from inside
+         * qemu_send_packet(), and then waits in the queue.
+         */
+        if (wire == EN_THINWIRE && !s->rx_size) {
             mb8795_take_packet(s, s->tx_buf, s->tx_size);
         }
+        qemu_send_packet(qemu_get_queue(s->nic), s->tx_buf, s->tx_size);
     }
 }
 
@@ -441,6 +534,11 @@ static void mb8795_tick(void *opaque)
     }
     s->in_tick = false;
 
+    /* packets that came while the receiver was busy */
+    if (s->recv_state == RECV_STATE_WAITING && !s->rx_size) {
+        qemu_flush_queued_packets(qemu_get_queue(s->nic));
+    }
+
     timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
               (s->recv_state == RECV_STATE_WAITING ? ENET_IO_DELAY
                                                    : ENET_IO_SHORT) *
@@ -484,11 +582,15 @@ static ssize_t mb8795_receive(NetClientState *nc, const uint8_t *buf,
                               size_t size)
 {
     MB8795State *s = qemu_get_nic_opaque(nc);
+    uint8_t pkt[MB8795_BUF_SIZE];
+    size_t len = MIN(size, sizeof(pkt));
 
     if (!mb8795_can_receive(nc)) {
         return 0;
     }
-    mb8795_take_packet(s, buf, size);
+    memcpy(pkt, buf, len);
+    len = mb8795_fix_bootp(s, pkt, len);
+    mb8795_take_packet(s, pkt, len);
     return size;
 }
 
