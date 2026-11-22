@@ -253,12 +253,33 @@ static void next_kms_km_receive(NeXTKMSState *s, uint32_t data)
         return;
     }
 
-    s->kmdata = data;
+    /*
+     * The keyboard and mouse keep their events until they are polled
+     * again: hold them while the CPU has not read the last one.
+     */
     if (s->status_km & KM_RECEIVED) {
-        s->status_km |= KM_OVERRUN;
+        if (s->q_len < NEXT_KMS_QUEUE) {
+            s->queue[(s->q_head + s->q_len) % NEXT_KMS_QUEUE] = data;
+            s->q_len++;
+        } else {
+            s->status_km |= KM_OVERRUN;
+        }
+        return;
     }
+    s->kmdata = data;
     s->status_km |= KM_RECEIVED | KM_INT;
     next_kms_set_irq(s, NEXT_KMS_IRQ_KEYMOUSE, true);
+}
+
+static void next_kms_km_next(NeXTKMSState *s)
+{
+    if (s->q_len && !(s->status_km & KM_RECEIVED)) {
+        uint32_t data = s->queue[s->q_head];
+
+        s->q_head = (s->q_head + 1) % NEXT_KMS_QUEUE;
+        s->q_len--;
+        next_kms_km_receive(s, data);
+    }
 }
 
 static void next_kms_command_out(NeXTKMSState *s, uint8_t command,
@@ -512,6 +533,7 @@ static void next_kms_reset_link(NeXTKMSState *s)
         s->sound_command(s->sound_opaque, 0, 0);
     }
     km_reset(s);
+    s->q_head = s->q_len = 0;
     for (int i = 0; i < NEXT_KMS_NUM_IRQS; i++) {
         next_kms_set_irq(s, i, false);
     }
@@ -584,6 +606,7 @@ static void next_kms_write_byte(NeXTKMSState *s, int n, uint8_t val)
         if (val & KM_OVERRUN) {
             s->status_km &= ~(KM_RECEIVED | KM_OVERRUN | KM_INT);
             next_kms_set_irq(s, NEXT_KMS_IRQ_KEYMOUSE, false);
+            next_kms_km_next(s);
         }
         if (val & NMI_RECEIVED) {
             s->status_km &= ~NMI_RECEIVED;
@@ -640,6 +663,7 @@ static uint64_t next_kms_read(void *opaque, hwaddr addr, unsigned size)
         val = extract32(s->kmdata, (12 - off - size) * 8, size * 8);
         s->status_km &= ~(KM_RECEIVED | KM_INT);
         next_kms_set_irq(s, NEXT_KMS_IRQ_KEYMOUSE, false);
+        next_kms_km_next(s);
         return val;
     }
     return 0;
@@ -750,6 +774,9 @@ static const VMStateDescription next_kms_vmstate = {
         VMSTATE_UINT8(modifiers, NeXTKMSState),
         VMSTATE_BOOL(button_left, NeXTKMSState),
         VMSTATE_BOOL(button_right, NeXTKMSState),
+        VMSTATE_UINT32(q_head, NeXTKMSState),
+        VMSTATE_UINT32(q_len, NeXTKMSState),
+        VMSTATE_UINT32_ARRAY(queue, NeXTKMSState, NEXT_KMS_QUEUE),
         VMSTATE_END_OF_LIST()
     },
 };

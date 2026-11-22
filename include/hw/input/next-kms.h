@@ -17,6 +17,7 @@
 #include "ui/input.h"
 
 #define TYPE_NEXT_KMS "next-kms"
+#define NEXT_KMS_QUEUE 64
 OBJECT_DECLARE_SIMPLE_TYPE(NeXTKMSState, NEXT_KMS)
 
 enum {
@@ -55,6 +56,11 @@ struct NeXTKMSState {
     uint32_t km_addr;
     uint32_t km_data[16];
     uint32_t km_mask;
+
+    /* keyboard and mouse events the CPU has not read yet */
+    uint32_t queue[NEXT_KMS_QUEUE];
+    uint32_t q_head;
+    uint32_t q_len;
 
     uint8_t modifiers;
     bool button_left;
