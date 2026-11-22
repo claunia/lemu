@@ -53,9 +53,10 @@ static ESPState *next_scsi_esp(NeXTSCSIState *s)
  * The real ESP takes a little while to finish a command; QEMU's raises its
  * interrupt inside the register write that started it. NeXT drivers note
  * what they started after that write, so the interrupt reaches the CPU
- * after it, as in Previous (about 100 CPU cycles).
+ * 100 us after it, as in Previous. With much less, NeXTSTEP 3.3 sometimes
+ * loses a command while it probes the bus.
  */
-#define NEXT_SCSI_IRQ_DELAY_NS 4000
+#define NEXT_SCSI_IRQ_DELAY_NS 100000
 
 static void next_scsi_update_irq(NeXTSCSIState *s)
 {
@@ -70,6 +71,28 @@ static void next_scsi_irq_timer(void *opaque)
     next_scsi_update_irq(s);
 }
 
+/*
+ * How long the chip takes to raise its interrupt. When no target answers
+ * a selection, the chip waits out the timeout the driver set: the select
+ * timeout register times 8192 times the clock conversion factor, in
+ * clocks of 20 MHz, as in Previous. That is about 250 ms, and the
+ * NeXTSTEP driver counts on it while it probes the bus: told at once,
+ * it sometimes misses the end of the command and resets the bus.
+ */
+static int64_t next_scsi_irq_delay(NeXTSCSIState *s)
+{
+    ESPState *esp = &s->esp.esp;
+
+    if (esp->rregs[ESP_RINTR] == INTR_DC && esp->rregs[ESP_RSEQ] == SEQ_0 &&
+        esp->rregs[ESP_RSTAT] == 0) {
+        int64_t sto = esp->wregs[ESP_WSEL] ? esp->wregs[ESP_WSEL] : 256;
+        int64_t ccf = esp->wregs[ESP_WCCF] & 7 ? esp->wregs[ESP_WCCF] & 7 : 8;
+
+        return sto * 8192 * ccf * 50;   /* 50 ns a clock at 20 MHz */
+    }
+    return NEXT_SCSI_IRQ_DELAY_NS;
+}
+
 static void next_scsi_esp_irq(void *opaque, int n, int level)
 {
     NeXTSCSIState *s = opaque;
@@ -78,7 +101,7 @@ static void next_scsi_esp_irq(void *opaque, int n, int level)
     if (level) {
         if (!s->esp_irq_out && !timer_pending(s->irq_timer)) {
             timer_mod(s->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                      NEXT_SCSI_IRQ_DELAY_NS);
+                      next_scsi_irq_delay(s));
         }
     } else {
         timer_del(s->irq_timer);
