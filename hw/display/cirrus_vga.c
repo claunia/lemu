@@ -1126,6 +1126,8 @@ static void cirrus_write_bitblt(CirrusVGAState * s, unsigned reg_value)
  *
  ***************************************/
 
+static int cirrus_get_bpp(VGACommonState *s1);
+
 static void cirrus_get_params(VGACommonState *s1,
                               VGADisplayParams *params)
 {
@@ -1135,6 +1137,13 @@ static void cirrus_get_params(VGACommonState *s1,
     line_offset = s->vga.cr[0x13]
         | ((s->vga.cr[0x1b] & 0x10) << 4);
     line_offset <<= 3;
+    /*
+     * Up to the GD5434, the offset counts in twice the bytes in 32 bpp, as
+     * in 86Box: BeOS programs 0xa0 for 640 pixels of 4 bytes.
+     */
+    if (s->device_id < CIRRUS_ID_CLGD5436 && cirrus_get_bpp(s1) == 32) {
+        line_offset <<= 1;
+    }
     params->line_offset = line_offset;
 
     params->start_addr = (s->vga.cr[0x0c] << 8)
