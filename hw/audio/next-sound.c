@@ -455,8 +455,18 @@ static void next_sound_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "next-sound: the dma and kms links are needed");
         return;
     }
-    if (!audio_be_check(&s->audio_be, errp)) {
-        return;
+    if (s->audio_be) {
+        if (!audio_be_check(&s->audio_be, errp)) {
+            return;
+        }
+    } else {
+        Error *err = NULL;
+
+        /* without a usable default the sound plays to nobody */
+        if (!audio_be_check(&s->audio_be, &err)) {
+            error_free(err);
+            s->audio_be = NULL;
+        }
     }
     if (s->audio_be) {
         s->voice_out = audio_be_open_out(s->audio_be, NULL, "next-sound.out",
