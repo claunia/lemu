@@ -51,7 +51,10 @@
 #include "hw/audio/next-dsp.h"
 #include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
+#include "net/net.h"
+#include "net/filter-next.h"
 #include "qapi/error.h"
+#include "qom/object_interfaces.h"
 #include "qom/object.h"
 #include "target/m68k/cpu.h"
 #include "migration/vmstate.h"
@@ -976,7 +979,45 @@ struct NeXTState {
 
     uint32_t bank_size[4];
     bool new_rtc;
+    bool net_services;
+    char *nfs_share;
 };
+
+/*
+ * On the user network, the servers NeXTSTEP looks for when it configures
+ * itself: bootparam, NetInfo and the time, as Previous gives them, and
+ * NFS when there is a folder to share.
+ */
+static void next_net_services(NeXTState *m, NeXTMachineClass *nc)
+{
+#ifdef CONFIG_SLIRP
+    NetClientState *peer = qemu_get_queue(m->enet.nic)->peer;
+    g_autofree char *type = NULL;
+
+    if (!m->net_services || !peer ||
+        peer->info->type != NET_CLIENT_DRIVER_USER) {
+        if (m->nfs_share) {
+            error_report("nfs-share needs the user network (-nic user)");
+            exit(1);
+        }
+        return;
+    }
+    type = g_strdup_printf("NeXT%s%s%s", nc->cube ? "cube" : "station",
+                           nc->turbo ? " Turbo" : "",
+                           nc->color ? " Color" : "");
+    object_new_with_props(TYPE_FILTER_NEXT, object_get_objects_root(),
+                          "next-net-services", &error_fatal,
+                          "netdev", peer->name,
+                          "share", m->nfs_share ? m->nfs_share : "",
+                          "system-type", type,
+                          NULL);
+#else
+    if (m->nfs_share) {
+        error_report("nfs-share needs QEMU built with the user network");
+        exit(1);
+    }
+#endif
+}
 
 /* Split the RAM into the four banks with the SIMM sizes the model takes */
 static bool next_split_ram(NeXTMachineClass *nc, uint64_t ram_size,
@@ -1254,6 +1295,7 @@ static void next_machine_init(MachineState *machine)
         sysbus_connect_irq(SYS_BUS_DEVICE(&m->enet), 1,
                            qdev_get_gpio_in(dev, NEXT_INT_EN_RX));
         m->pc.enet = &m->enet;
+        next_net_services(m, nc);
     }
 
     /* MO controller: on all machines but the Turbo ones */
@@ -1408,12 +1450,36 @@ static void next_set_new_rtc(Object *obj, bool value, Error **errp)
     NEXT_MACHINE(obj)->new_rtc = value;
 }
 
+static bool next_get_net_services(Object *obj, Error **errp)
+{
+    return NEXT_MACHINE(obj)->net_services;
+}
+
+static void next_set_net_services(Object *obj, bool value, Error **errp)
+{
+    NEXT_MACHINE(obj)->net_services = value;
+}
+
+static char *next_get_nfs_share(Object *obj, Error **errp)
+{
+    return g_strdup(NEXT_MACHINE(obj)->nfs_share);
+}
+
+static void next_set_nfs_share(Object *obj, const char *value, Error **errp)
+{
+    NeXTState *m = NEXT_MACHINE(obj);
+
+    g_free(m->nfs_share);
+    m->nfs_share = value && *value ? g_strdup(value) : NULL;
+}
+
 static void next_machine_instance_init(Object *obj)
 {
     NeXTMachineClass *nc = NEXT_MACHINE_GET_CLASS(obj);
 
     /* Turbo machines have the newer MCCS1850 clock */
     NEXT_MACHINE(obj)->new_rtc = nc->turbo;
+    NEXT_MACHINE(obj)->net_services = true;
 }
 
 static void next_machine_class_init(ObjectClass *oc, const void *data)
@@ -1428,6 +1494,16 @@ static void next_machine_class_init(ObjectClass *oc, const void *data)
                                    next_set_new_rtc);
     object_class_property_set_description(oc, "new-rtc",
         "Use the MCCS1850 clock chip instead of the MC68HC68T1");
+    object_class_property_add_bool(oc, "net-services", next_get_net_services,
+                                   next_set_net_services);
+    object_class_property_set_description(oc, "net-services",
+        "On the user network, answer NeXTSTEP's bootparam, NetInfo and "
+        "time requests (default: on)");
+    object_class_property_add_str(oc, "nfs-share", next_get_nfs_share,
+                                  next_set_nfs_share);
+    object_class_property_set_description(oc, "nfs-share",
+        "A host folder to share by NFS on the user network; NeXTSTEP "
+        "mounts it on /Net");
 }
 
 typedef struct NeXTModelInfo {
