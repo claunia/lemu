@@ -288,8 +288,8 @@ static void tc_mii_write(TC90XState *s, uint16_t val)
         }
         break;
     case MII_DATA_OUT:
-        /* one turnaround bit, then 16 data bits */
-        if (++s->mii_bits >= 17) {
+        /* two turnaround bits, then 16 data bits */
+        if (++s->mii_bits >= 18) {
             s->mii_state = MII_IDLE;
             s->mii_bits = 0;
             s->mii_shift = 0;
@@ -312,8 +312,12 @@ static uint16_t tc_mii_read(TC90XState *s)
     uint16_t val = s->phys_mgmt;
 
     if (s->mii_state == MII_DATA_OUT && !(s->phys_mgmt & 4)) {
-        /* bit 1..16 after the turnaround bit carry the data, msb first */
-        int bit = s->mii_bits - 1;
+        /*
+         * The driver samples the data line while the clock is low, before
+         * each rising edge: after the two turnaround bits come the 16 data
+         * bits, most significant first.
+         */
+        int bit = s->mii_bits - 2;
 
         val &= ~2;
         if (bit >= 0 && bit < 16 && (s->mii_out & BIT(15 - bit))) {
