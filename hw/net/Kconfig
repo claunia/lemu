@@ -25,6 +25,12 @@ config PCNET_PCI
 config PCNET_COMMON
     bool
 
+config VIA_RHINE
+    bool
+    default y if PCI_DEVICES
+    depends on PCI
+    select NMC93XX_EEPROM
+
 config TULIP
     bool
     default y if PCI_DEVICES
