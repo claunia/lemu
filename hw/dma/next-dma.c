@@ -335,8 +335,17 @@ static MemTxResult next_dma_csr_write_ops(void *opaque, hwaddr addr,
     if (ch < 0 || (addr & 0xc)) {
         return MEMTX_DECODE_ERROR;
     }
-    /* the commands of a byte write are in that byte */
-    next_dma_csr_write(s, ch, (uint32_t)data << next_dma_shift(addr, size));
+    /*
+     * The bus copies a byte or a word into every lane of the long word,
+     * as Previous does: the commands are in bits 16-23, wherever a byte
+     * write goes. The 68030 ROMs write them as bytes at the start.
+     */
+    if (size == 1) {
+        data = (data & 0xff) * 0x01010101u;
+    } else if (size == 2) {
+        data = (data & 0xffff) * 0x00010001u;
+    }
+    next_dma_csr_write(s, ch, (uint32_t)data);
     return MEMTX_OK;
 }
 
