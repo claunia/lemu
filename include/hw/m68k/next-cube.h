@@ -117,5 +117,7 @@ enum {
 #define NEXT_IO_RAMDAC       0x18100
 #define NEXT_IO_COLOR_CSR    0x18180
 #define NEXT_IO_EVENTC       0x1A000
+#define NEXT_IO_RAMDAC_TURBO 0x1C000
+#define NEXT_TMC_BASE        0x02200000
 
 #endif /* NEXT_CUBE_H */

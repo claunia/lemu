@@ -51,6 +51,8 @@
 #include "hw/audio/next-dsp.h"
 #include "hw/audio/next-sound.h"
 #include "hw/display/bt463.h"
+#include "hw/m68k/next-tmc.h"
+#include "hw/core/or-irq.h"
 #include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
 #include "net/net.h"
@@ -115,6 +117,7 @@ struct NeXTPC {
     uint32_t eventc_latch;
 
     QEMUTimer *vbl_timer;
+    qemu_irq vbl_out;       /* to the TMC on the Turbo machines */
 
     uint32_t bmap[16];
 };
@@ -693,7 +696,7 @@ static void next_vbl_tick(void *opaque)
     NeXTPC *s = opaque;
 
     if (s->turbo) {
-        /* the TMC does it */
+        qemu_irq_pulse(s->vbl_out);
     } else if (s->color) {
         if (s->col_vid & VID_CMD_ENABLE_INT) {
             next_pc_set_int(s, NEXT_INT_DISK, true);
@@ -729,7 +732,8 @@ static void next_pc_reset_hold(Object *obj, ResetType type)
     if (s->turbo) {
         s->scr2[2] = 0x10; /* video mode is 25 MHz */
         s->scr2[3] = 0x80; /* local only */
-        if (s->model == NEXT_MODEL_STATION) {
+        /* the model is what the Turbo machine is, the type says Turbo */
+        if (s->model != NEXT_MODEL_CUBE) {
             scr1 |= 0xFu << 28;
         }
         scr1 |= NEXT_MODEL_TURBO << 12;
@@ -795,6 +799,7 @@ static void next_pc_realize(DeviceState *dev, Error **errp)
     s->hardclock_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                       next_hardclock_tick, s);
     s->vbl_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, next_vbl_tick, s);
+    qdev_init_gpio_out_named(dev, &s->vbl_out, "vbl", 1);
 }
 
 static const Property next_pc_properties[] = {
@@ -1005,6 +1010,9 @@ struct NeXTState {
     NeXTDSPState dsp;
     NeXTSoundState sound;
     BT463State ramdac;
+    NeXTTMCState tmc;
+    OrIRQState nmi_or;
+    MemoryRegion mo_dummy;
     NeXTPrinterState printer;
     ESCCState escc;
     NeXTPC pc;
@@ -1158,6 +1166,31 @@ static void next_power_key(void *opaque, bool down)
     }
 }
 
+/* The ADB power key goes to the clock chip */
+static void next_tmc_power_key(void *opaque, int n, int level)
+{
+    next_power_key(opaque, level);
+}
+
+/* Registers that read 0 and ignore writes */
+static uint64_t next_dummy_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return 0;
+}
+
+static void next_dummy_write(void *opaque, hwaddr addr, uint64_t val,
+                             unsigned size)
+{
+}
+
+static const MemoryRegionOps next_dummy_ops = {
+    .read = next_dummy_read,
+    .write = next_dummy_write,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+    .endianness = DEVICE_BIG_ENDIAN,
+};
+
 static void next_cpu_reset(void *opaque)
 {
     M68kCPU *cpu = opaque;
@@ -1266,8 +1299,13 @@ static void next_machine_init(MachineState *machine)
     if (nc->color) {
         object_initialize_child(OBJECT(m), "ramdac", &m->ramdac, TYPE_BT463);
         sysbus_realize(SYS_BUS_DEVICE(&m->ramdac), &error_fatal);
-        m->pc.ramdac_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->ramdac),
-                                                 0);
+        if (nc->turbo) {
+            memory_region_add_subregion(&m->io, NEXT_IO_RAMDAC_TURBO,
+                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->ramdac), 0));
+        } else {
+            m->pc.ramdac_mr =
+                sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->ramdac), 0);
+        }
     }
     sysbus_realize(sbd, &error_fatal);
     memory_region_add_subregion(&m->io, NEXT_IO_INTSTAT,
@@ -1339,6 +1377,8 @@ static void next_machine_init(MachineState *machine)
         object_property_set_link(OBJECT(&m->enet), "dma", OBJECT(&m->dma),
                                  &error_abort);
         qdev_prop_set_bit(DEVICE(&m->enet), "turbo", nc->turbo);
+        /* NeXTSTEP looks for twisted pair first on the Turbo machines */
+        qdev_prop_set_bit(DEVICE(&m->enet), "twisted-pair", nc->turbo);
         qdev_prop_set_bit(DEVICE(&m->enet), "no-tpe", is_030);
         sysbus_realize(SYS_BUS_DEVICE(&m->enet), &error_fatal);
         memory_region_add_subregion(&m->io, NEXT_IO_ENET,
@@ -1352,7 +1392,12 @@ static void next_machine_init(MachineState *machine)
     }
 
     /* MO controller: on all machines but the Turbo ones */
-    if (!nc->turbo) {
+    if (nc->turbo) {
+        /* four registers that read 0, as in Previous */
+        memory_region_init_io(&m->mo_dummy, OBJECT(m), &next_dummy_ops, NULL,
+                              "next.mo-dummy", 0x2000);
+        memory_region_add_subregion(&m->io, NEXT_IO_MO, &m->mo_dummy);
+    } else {
         object_initialize_child(OBJECT(m), "mo", &m->mo, TYPE_NEXT_MO);
         sysbus_realize(SYS_BUS_DEVICE(&m->mo), &error_fatal);
         memory_region_add_subregion(&m->io, NEXT_IO_MO,
@@ -1402,6 +1447,7 @@ static void next_machine_init(MachineState *machine)
     /* Keyboard, mouse and sound */
     object_initialize_child(OBJECT(m), "kms", &m->kms, TYPE_NEXT_KMS);
     qdev_prop_set_bit(DEVICE(&m->kms), "turbo", nc->turbo);
+    qdev_prop_set_bit(DEVICE(&m->kms), "input", !nc->turbo);
     sysbus_realize(SYS_BUS_DEVICE(&m->kms), &error_fatal);
     memory_region_add_subregion(&m->io, NEXT_IO_KMS,
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->kms), 0));
@@ -1412,12 +1458,49 @@ static void next_machine_init(MachineState *machine)
             [NEXT_KMS_IRQ_SOUND_OVRUN] = NEXT_INT_SOUND_OVRUN,
             [NEXT_KMS_IRQ_NMI] = NEXT_INT_NMI,
         };
+        /* the KMS and the TMC both give NMIs */
+        object_initialize_child(OBJECT(m), "nmi-or", &m->nmi_or, TYPE_OR_IRQ);
+        object_property_set_int(OBJECT(&m->nmi_or), "num-lines", 2,
+                                &error_abort);
+        qdev_realize(DEVICE(&m->nmi_or), NULL, &error_fatal);
+        qdev_connect_gpio_out(DEVICE(&m->nmi_or), 0,
+                              qdev_get_gpio_in(dev, NEXT_INT_NMI));
         for (int i = 0; i < NEXT_KMS_NUM_IRQS; i++) {
             sysbus_connect_irq(SYS_BUS_DEVICE(&m->kms), i,
+                               i == NEXT_KMS_IRQ_NMI ?
+                               qdev_get_gpio_in(DEVICE(&m->nmi_or), 0) :
                                qdev_get_gpio_in(dev, kms_int[i]));
         }
     }
     next_kms_set_power_key(&m->kms, next_power_key, &m->rtc);
+
+    /* Turbo memory controller, with the ADB keyboard and mouse */
+    if (nc->turbo) {
+        BusState *adb;
+
+        object_initialize_child(OBJECT(m), "tmc", &m->tmc, TYPE_NEXT_TMC);
+        qdev_prop_set_uint8(DEVICE(&m->tmc), "machine-type",
+                            nc->cube ? NEXT_TMC_CUBE :
+                            nc->color ? NEXT_TMC_STATION_COLOR :
+                            NEXT_TMC_STATION);
+        qdev_prop_set_bit(DEVICE(&m->tmc), "station", !nc->cube);
+        sysbus_realize(SYS_BUS_DEVICE(&m->tmc), &error_fatal);
+        memory_region_add_subregion(sysmem, NEXT_TMC_BASE,
+                        sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->tmc), 0));
+        sysbus_connect_irq(SYS_BUS_DEVICE(&m->tmc), NEXT_TMC_IRQ_DISK,
+                           qdev_get_gpio_in(dev, NEXT_INT_DISK));
+        sysbus_connect_irq(SYS_BUS_DEVICE(&m->tmc), NEXT_TMC_IRQ_NMI,
+                           qdev_get_gpio_in(DEVICE(&m->nmi_or), 1));
+        sysbus_connect_irq(SYS_BUS_DEVICE(&m->tmc), NEXT_TMC_IRQ_POWER,
+                           qemu_allocate_irq(next_tmc_power_key, &m->rtc, 0));
+        qdev_connect_gpio_out_named(dev, "vbl", 0,
+                                    qdev_get_gpio_in_named(DEVICE(&m->tmc),
+                                                           "vbl", 0));
+        adb = qdev_get_child_bus(DEVICE(&m->tmc), "adb.0");
+        qdev_realize_and_unref(qdev_new(TYPE_ADB_KEYBOARD), adb,
+                               &error_fatal);
+        qdev_realize_and_unref(qdev_new(TYPE_ADB_MOUSE), adb, &error_fatal);
+    }
 
     /* Sound, in the monitor at the other end of the KMS link */
     object_initialize_child(OBJECT(m), "sound", &m->sound, TYPE_NEXT_SOUND);
@@ -1443,6 +1526,7 @@ static void next_machine_init(MachineState *machine)
     /* Frame buffer */
     dev = qdev_new(TYPE_NEXTFB);
     qdev_prop_set_bit(dev, "color", nc->color);
+    qdev_prop_set_bit(dev, "turbo", nc->turbo);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
     vram_base = nc->turbo ? NEXT_VRAM_TURBO_BASE :
                 nc->color ? NEXT_VRAM_COLOR_BASE : NEXT_VRAM_BASE;
@@ -1623,6 +1707,32 @@ static const NeXTModelInfo next_models[] = {
         .color = true,
         .cpu = M68K_CPU_TYPE_NAME("m68040"),
         .rom = "Rev_2.5_v66.bin",
+        .ram = 32 * MiB,
+    }, {
+        .name = MACHINE_TYPE_NAME("next-cube-turbo"),
+        .desc = "NeXTcube Turbo (68040)",
+        .model = NEXT_MODEL_CUBE,
+        .turbo = true,
+        .cube = true,
+        .cpu = M68K_CPU_TYPE_NAME("m68040"),
+        .rom = "Rev_3.3_v74.bin",
+        .ram = 64 * MiB,
+    }, {
+        .name = MACHINE_TYPE_NAME("next-station-turbo"),
+        .desc = "NeXTstation Turbo (68040)",
+        .model = NEXT_MODEL_STATION,
+        .turbo = true,
+        .cpu = M68K_CPU_TYPE_NAME("m68040"),
+        .rom = "Rev_3.3_v74.bin",
+        .ram = 32 * MiB,
+    }, {
+        .name = MACHINE_TYPE_NAME("next-station-turbo-color"),
+        .desc = "NeXTstation Turbo Color (68040)",
+        .model = NEXT_MODEL_STATION_COLOR,
+        .turbo = true,
+        .color = true,
+        .cpu = M68K_CPU_TYPE_NAME("m68040"),
+        .rom = "Rev_3.3_v74.bin",
         .ram = 32 * MiB,
     },
 };
