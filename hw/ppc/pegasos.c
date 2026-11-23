@@ -2,6 +2,7 @@
  * QEMU PowerPC CHRP (Genesi/bPlan Pegasos I/II) hardware System Emulator
  *
  * Copyright (c) 2018-2021 BALATON Zoltan
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  *
@@ -149,6 +150,7 @@ static void pegasos2_setup_pci_irq(PegasosMachineState *pm)
 static void pegasos_init(MachineState *machine)
 {
     PegasosMachineState *pm = PEGASOS_MACHINE(machine);
+    MachineClass *mc = MACHINE_GET_CLASS(machine);
     CPUPPCState *env;
     MemoryRegion *rom = g_new(MemoryRegion, 1);
     PCIBus *pci_bus = NULL;
@@ -265,6 +267,14 @@ static void pegasos_init(MachineState *machine)
 
     /* other PC hardware */
     pci_vga_init(pci_bus);
+
+    if (pm->type == PEGASOS2) {
+        /* on board VIA VT6102 Rhine-II Ethernet */
+        pci_init_nic_in_slot(pci_bus, "via-rhine", NULL, "0d");
+    }
+    if (mc->default_nic) {
+        pci_init_nic_devices(pci_bus, mc->default_nic);
+    }
 
     /* pci interrupt routing */
     switch (pm->type) {
@@ -496,6 +506,13 @@ static void pegasos2_chipset_reset(PegasosMachineState *pm)
 
     pegasos2_pci_config_write(pm, 1, (PCI_DEVFN(12, 6) << 8) |
                               PCI_INTERRUPT_LINE, 2, 0x309);
+
+    /* on board Ethernet */
+    pegasos2_pci_config_write(pm, 1, (PCI_DEVFN(13, 0) << 8) |
+                              PCI_INTERRUPT_LINE, 2, 0x109);
+    pegasos2_pci_config_write(pm, 1, (PCI_DEVFN(13, 0) << 8) |
+                              PCI_COMMAND, 2, PCI_COMMAND_IO |
+                              PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER);
 }
 
 static void pegasos_machine_reset(MachineState *machine, ResetType type)
@@ -785,6 +802,7 @@ static void pegasos2_machine_class_init(ObjectClass *oc, const void *data)
 
     mc->desc = "Genesi/bPlan Pegasos II";
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("7457_v1.2");
+    mc->default_nic = "via-rhine";
 }
 
 DEFINE_MACHINE_EXTENDED("pegasos", MACHINE, PegasosMachineState,

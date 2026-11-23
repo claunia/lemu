@@ -101,6 +101,7 @@ config PEGASOS
     select VT82C686
     select SMBUS_EEPROM
     select VOF
+    select VIA_RHINE
 
 config PREP
     bool
