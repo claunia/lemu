@@ -94,6 +94,7 @@
 #define NUM_CYLINDERS   80
 #define TRACKS_PER_CYL  2
 #define FLP_SEEK_TIME   200000  /* us */
+#define FLP_NEXT_SECTOR_TIME 20 /* us */
 
 #define MEDIA_ID_NONE   0
 #define MEDIA_ID_720K   3
@@ -705,7 +706,12 @@ static void next_fdc_io(void *opaque)
     default:
         return;
     }
-    next_fdc_schedule(s, next_fdc_sector_time(s));
+    /*
+     * The next sector comes at once, not a sector time later: the ROM
+     * times a transfer with an instruction loop made for a 25 MHz 68040,
+     * which TCG runs through in a few milliseconds.
+     */
+    next_fdc_schedule(s, FLP_NEXT_SECTOR_TIME);
 }
 
 /* ---- registers ---- */
