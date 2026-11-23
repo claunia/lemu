@@ -213,6 +213,15 @@ static void next_pc_scc_irq(void *opaque, int n, int level)
     next_pc_set_int(s, NEXT_INT_SCC, s->scc_irq != 0);
 }
 
+/*
+ * The bits of a 32-bit register that a byte or word access at addr
+ * reaches: QEMU does not align such accesses for the device.
+ */
+static int next_reg_shift(hwaddr addr, unsigned size)
+{
+    return (4 - (addr & 3) - size) * 8;
+}
+
 /* Interrupt status and mask: 0x02007000, 0x02007800 */
 static uint64_t next_int_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -224,26 +233,28 @@ static uint64_t next_int_read(void *opaque, hwaddr addr, unsigned size)
     } else {
         val = s->int_status;
     }
-    return val;
+    return extract32(val, next_reg_shift(addr, size), size * 8);
 }
 
 static void next_int_write(void *opaque, hwaddr addr, uint64_t val,
                            unsigned size)
 {
     NeXTPC *s = opaque;
+    uint32_t mask;
 
     if (!(addr & 0x800)) {
         /* the status register is read only */
         return;
     }
-    s->int_mask = val | (s->turbo ? INT_ZEROBITS : INT_NONMASKABLE);
+    mask = deposit32(s->int_mask, next_reg_shift(addr, size), size * 8, val);
+    s->int_mask = mask | (s->turbo ? INT_ZEROBITS : INT_NONMASKABLE);
     next_pc_update_irq(s);
 }
 
 static const MemoryRegionOps next_int_ops = {
     .read = next_int_read,
     .write = next_int_write,
-    .impl.min_access_size = 4,
+    .impl.min_access_size = 1,
     .impl.max_access_size = 4,
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,
@@ -255,7 +266,7 @@ static uint64_t next_scr1_read(void *opaque, hwaddr addr, unsigned size)
 {
     NeXTPC *s = opaque;
 
-    return s->scr1;
+    return extract32(s->scr1, next_reg_shift(addr, size), size * 8);
 }
 
 static void next_scr1_write(void *opaque, hwaddr addr, uint64_t val,
@@ -266,7 +277,7 @@ static void next_scr1_write(void *opaque, hwaddr addr, uint64_t val,
 static const MemoryRegionOps next_scr1_ops = {
     .read = next_scr1_read,
     .write = next_scr1_write,
-    .impl.min_access_size = 4,
+    .impl.min_access_size = 1,
     .impl.max_access_size = 4,
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,

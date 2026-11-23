@@ -301,6 +301,15 @@ static void next_dma_csr_write(NeXTDMAState *s, NeXTDMAChannel ch,
     next_dma_kick(s, ch);
 }
 
+/*
+ * The bits of a 32-bit register that a byte or word access at addr
+ * reaches: QEMU does not align such accesses for the device.
+ */
+static int next_dma_shift(hwaddr addr, unsigned size)
+{
+    return (4 - (addr & 3) - size) * 8;
+}
+
 /* CSRs: 0x02000000 - 0x02001fff, bit 12 is not decoded */
 static MemTxResult next_dma_csr_read(void *opaque, hwaddr addr,
                                      uint64_t *data, unsigned size,
@@ -312,7 +321,7 @@ static MemTxResult next_dma_csr_read(void *opaque, hwaddr addr,
     if (ch < 0 || (addr & 0xc)) {
         return MEMTX_DECODE_ERROR;
     }
-    *data = s->ch[ch].csr;
+    *data = extract32(s->ch[ch].csr, next_dma_shift(addr, size), size * 8);
     return MEMTX_OK;
 }
 
@@ -326,14 +335,15 @@ static MemTxResult next_dma_csr_write_ops(void *opaque, hwaddr addr,
     if (ch < 0 || (addr & 0xc)) {
         return MEMTX_DECODE_ERROR;
     }
-    next_dma_csr_write(s, ch, data);
+    /* the commands of a byte write are in that byte */
+    next_dma_csr_write(s, ch, (uint32_t)data << next_dma_shift(addr, size));
     return MEMTX_OK;
 }
 
 static const MemoryRegionOps next_dma_csr_ops = {
     .read_with_attrs = next_dma_csr_read,
     .write_with_attrs = next_dma_csr_write_ops,
-    .impl.min_access_size = 4,
+    .impl.min_access_size = 1,
     .impl.max_access_size = 4,
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,
@@ -402,7 +412,7 @@ static MemTxResult next_dma_reg_read(void *opaque, hwaddr addr,
     if (!r) {
         return MEMTX_DECODE_ERROR;
     }
-    *data = *r;
+    *data = extract32(*r, next_dma_shift(addr, size), size * 8);
     return MEMTX_OK;
 }
 
@@ -422,9 +432,9 @@ static MemTxResult next_dma_reg_write(void *opaque, hwaddr addr,
         /* read only */
         return MEMTX_OK;
     }
-    *r = data;
+    *r = deposit32(*r, next_dma_shift(addr, size), size * 8, data);
     if (init) {
-        next_dma_init_buffer(s, ch, data & 0xf);
+        next_dma_init_buffer(s, ch, *r & 0xf);
     }
     return MEMTX_OK;
 }
@@ -432,7 +442,7 @@ static MemTxResult next_dma_reg_write(void *opaque, hwaddr addr,
 static const MemoryRegionOps next_dma_reg_ops = {
     .read_with_attrs = next_dma_reg_read,
     .write_with_attrs = next_dma_reg_write,
-    .impl.min_access_size = 4,
+    .impl.min_access_size = 1,
     .impl.max_access_size = 4,
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,
