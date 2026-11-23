@@ -81,6 +81,7 @@ struct NeXTPC {
     MemoryRegion *escc_mr;
     MemoryRegion *ramdac_mr;    /* colour machines */
     MB8795State *enet;
+    NeXTDSPState *dsp;
 
     MemoryRegion int_mem;
     MemoryRegion scr1_mem;
@@ -121,6 +122,10 @@ struct NeXTPC {
     qemu_irq vbl_out;       /* to the TMC on the Turbo machines */
 
     uint32_t bmap[16];
+
+    /* the DSP's interrupt lines */
+    bool dsp_hreq;
+    bool dsp_txd;
 };
 
 /* SCR1 fields (non-Turbo) */
@@ -129,8 +134,18 @@ struct NeXTPC {
 #define SCR1_BOARD_REV1     1
 
 /* SCR2 byte 0 */
+#define SCR2_DSP_RESET      0x80    /* 0 holds the DSP in reset */
+#define SCR2_DSP_BLK_END    0x40    /* DSP IRQB at the end of a DMA block */
+#define SCR2_DSP_UNPKD      0x20    /* unpacked DSP DMA */
+#define SCR2_DSP_MODE_B     0x10
+#define SCR2_DSP_MODE_A     0x08
 #define SCR2_SOFTINT2       0x02
 #define SCR2_SOFTINT1       0x01
+/* SCR2 byte 1 */
+#define SCR2_DSP_TXD_EN     0x80    /* Turbo */
+/* SCR2 byte 3 */
+#define SCR2_DSP_INT_EN     0x40    /* not Turbo: DSP at level 4, not 3 */
+#define SCR2_DSP_MEM_EN     0x20    /* DSP memory, inverted but on Turbo */
 /* SCR2 byte 2 */
 #define SCR2_TIMERIPL7      0x80
 #define SCR2_RTDATA         0x04
@@ -151,6 +166,9 @@ struct NeXTPC {
 
 /* BMAP registers */
 #define BMAP_RCNTL          0x1
+#define BMAP_BURWREN        0x3
+#define BMAP_DSP_HREQ       0x20000000
+#define BMAP_DSP_TXD        0x10000000
 #define BMAP_DDIR           0xC
 #define BMAP_DRW            0xD
 #define BMAP_LO             0x40000000
@@ -293,6 +311,48 @@ static const MemoryRegionOps next_scr1_ops = {
     .endianness = DEVICE_BIG_ENDIAN,
 };
 
+/* The DSP's interrupt, as SCR2 and the BMAP route it */
+static void next_pc_check_dsp(NeXTPC *s)
+{
+    bool l3 = false, l4 = false;
+
+    if (s->turbo) {
+        l4 = s->dsp_hreq || ((s->scr2[1] & SCR2_DSP_TXD_EN) && s->dsp_txd);
+    } else if (s->scr2[3] & SCR2_DSP_INT_EN) {
+        if (s->model == NEXT_MODEL_COMPUTER) {
+            l4 = s->dsp_hreq || s->dsp_txd;
+        } else {
+            l4 = (s->dsp_hreq && (s->bmap[BMAP_BURWREN] & BMAP_DSP_HREQ)) ||
+                 (s->dsp_txd && (s->bmap[BMAP_BURWREN] & BMAP_DSP_TXD));
+        }
+    } else {
+        l3 = s->dsp_hreq;   /* the diagnostics expect this */
+    }
+    next_pc_set_int(s, NEXT_INT_DSP_L3, l3);
+    next_pc_set_int(s, NEXT_INT_DSP_L4, l4);
+}
+
+static void next_pc_dsp_irq(void *opaque, int n, int level)
+{
+    NeXTPC *s = opaque;
+
+    if (n == NEXT_DSP_HREQ) {
+        s->dsp_hreq = level;
+    } else {
+        s->dsp_txd = level;
+    }
+    next_pc_check_dsp(s);
+}
+
+/*
+ * Only the first 68030 board's DSP memory comes and goes with the DSP's
+ * reset; the others have a bit in SCR2 for it.
+ */
+static bool next_pc_dsp_memreset(NeXTPC *s)
+{
+    return s->turbo || s->model != NEXT_MODEL_COMPUTER;
+}
+
 /* SCR2: 0x0200d000, four byte registers */
 static uint8_t next_scr2_read_byte(NeXTPC *s, int n)
 {
@@ -319,6 +379,33 @@ static void next_scr2_write_byte(NeXTPC *s, int n, uint8_t val)
         }
         if (changed & SCR2_SOFTINT2) {
             next_pc_set_int(s, NEXT_INT_SOFT2, val & SCR2_SOFTINT2);
+        }
+        if (s->dsp && (changed & SCR2_DSP_RESET)) {
+            /* the mode pins are low active */
+            next_dsp_set_running(s->dsp, val & SCR2_DSP_RESET,
+                                 (~val >> 3) & 3);
+            if (!next_pc_dsp_memreset(s)) {
+                next_dsp_set_memory(s->dsp, val & SCR2_DSP_RESET);
+            }
+        }
+        if (s->dsp && (changed & (SCR2_DSP_BLK_END | SCR2_DSP_UNPKD))) {
+            next_dsp_set_dma_options(s->dsp, val & SCR2_DSP_BLK_END,
+                                     val & SCR2_DSP_UNPKD);
+        }
+        break;
+    case 1:
+        if (s->turbo && (changed & SCR2_DSP_TXD_EN)) {
+            next_pc_check_dsp(s);
+        }
+        break;
+    case 3:
+        if (!s->turbo && (changed & SCR2_DSP_INT_EN)) {
+            next_pc_check_dsp(s);
+        }
+        if (s->dsp && (changed & SCR2_DSP_MEM_EN) &&
+            next_pc_dsp_memreset(s)) {
+            next_dsp_set_memory(s->dsp, s->turbo ? val & SCR2_DSP_MEM_EN
+                                                 : !(val & SCR2_DSP_MEM_EN));
         }
         break;
     case 2:
@@ -675,6 +762,9 @@ static MemTxResult next_bmap_write(void *opaque, hwaddr addr, uint64_t data,
         }
     }
     s->bmap[reg] = val;
+    if (reg == BMAP_BURWREN) {
+        next_pc_check_dsp(s);
+    }
     if (reg == BMAP_DDIR && (val & BMAP_RESET)) {
         next_warm_reset = true;
         qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
@@ -748,6 +838,13 @@ static void next_pc_reset_hold(Object *obj, ResetType type)
     }
     s->scr1 = scr1;
 
+    /* the DSP's memory as SCR2 now says */
+    s->dsp_hreq = s->dsp_txd = false;
+    if (s->dsp) {
+        next_dsp_set_dma_options(s->dsp, false, false);
+        next_dsp_set_memory(s->dsp, !s->turbo && next_pc_dsp_memreset(s));
+    }
+
     next_rtc_reset_interface(s->rtc);
     next_pc_update_irq(s);
 
@@ -762,6 +859,8 @@ static void next_pc_init(Object *obj)
 
     qdev_init_gpio_in(DEVICE(obj), next_pc_irq, NEXT_NUM_IRQS);
     qdev_init_gpio_in_named(DEVICE(obj), next_pc_scc_irq, "scc", 2);
+    qdev_init_gpio_in_named(DEVICE(obj), next_pc_dsp_irq, "dsp",
+                            NEXT_DSP_NUM_IRQS);
 
     memory_region_init_io(&s->int_mem, obj, &next_int_ops, s,
                           "next.intregs", 0x1000);
@@ -825,8 +924,8 @@ static int next_pc_post_load(void *opaque, int version_id)
 
 static const VMStateDescription next_pc_vmstate = {
     .name = "next-pc",
-    .version_id = 6,
-    .minimum_version_id = 6,
+    .version_id = 7,
+    .minimum_version_id = 7,
     .post_load = next_pc_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(scr1, NeXTPC),
@@ -847,6 +946,8 @@ static const VMStateDescription next_pc_vmstate = {
         VMSTATE_UINT32(eventc_latch, NeXTPC),
         VMSTATE_TIMER_PTR(vbl_timer, NeXTPC),
         VMSTATE_UINT32_ARRAY(bmap, NeXTPC, 16),
+        VMSTATE_BOOL(dsp_hreq, NeXTPC),
+        VMSTATE_BOOL(dsp_txd, NeXTPC),
         VMSTATE_END_OF_LIST()
     },
 };
@@ -1025,6 +1126,7 @@ struct NeXTState {
     bool net_services;
     char *nfs_share;
     bool nitro;
+    bool dsp_ram_expansion;
 };
 
 /*
@@ -1466,7 +1568,16 @@ static void next_machine_init(MachineState *machine)
 
     /* DSP */
     object_initialize_child(OBJECT(m), "dsp", &m->dsp, TYPE_NEXT_DSP);
+    object_property_set_link(OBJECT(&m->dsp), "dma", OBJECT(&m->dma),
+                             &error_abort);
+    qdev_prop_set_bit(DEVICE(&m->dsp), "turbo", nc->turbo);
+    qdev_prop_set_bit(DEVICE(&m->dsp), "ram-expansion", m->dsp_ram_expansion);
     sysbus_realize(SYS_BUS_DEVICE(&m->dsp), &error_fatal);
+    for (int i = 0; i < NEXT_DSP_NUM_IRQS; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(&m->dsp), i,
+                           qdev_get_gpio_in_named(dev, "dsp", i));
+    }
+    m->pc.dsp = &m->dsp;
     memory_region_add_subregion(&m->io, NEXT_IO_DSP,
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->dsp), 0));
 
@@ -1687,6 +1798,16 @@ static void next_set_nitro(Object *obj, bool value, Error **errp)
     NEXT_MACHINE(obj)->nitro = value;
 }
 
+static bool next_get_dsp_ram(Object *obj, Error **errp)
+{
+    return NEXT_MACHINE(obj)->dsp_ram_expansion;
+}
+
+static void next_set_dsp_ram(Object *obj, bool value, Error **errp)
+{
+    NEXT_MACHINE(obj)->dsp_ram_expansion = value;
+}
+
 static void next_machine_instance_init(Object *obj)
 {
     NeXTMachineClass *nc = NEXT_MACHINE_GET_CLASS(obj);
@@ -1721,6 +1842,10 @@ static void next_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "nitro",
         "On the Turbo machines, a 40 MHz Nitro board with its cache "
         "controller");
+    object_class_property_add_bool(oc, "dsp-ram-expansion", next_get_dsp_ram,
+                                   next_set_dsp_ram);
+    object_class_property_set_description(oc, "dsp-ram-expansion",
+        "32K words of DSP memory instead of 8K (default: off)");
     object_class_property_set_description(oc, "nfs-share",
         "A host folder to share by NFS on the user network; NeXTSTEP "
         "mounts it on /Net");
