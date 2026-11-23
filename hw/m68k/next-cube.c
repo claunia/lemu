@@ -50,6 +50,7 @@
 #include "hw/block/next-fdc.h"
 #include "hw/audio/next-dsp.h"
 #include "hw/audio/next-sound.h"
+#include "hw/display/bt463.h"
 #include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
 #include "net/net.h"
@@ -75,6 +76,7 @@ struct NeXTPC {
     NeXTRTC *rtc;
     NeXTDMAState *dma;
     MemoryRegion *escc_mr;
+    MemoryRegion *ramdac_mr;    /* colour machines */
     MB8795State *enet;
 
     MemoryRegion int_mem;
@@ -560,8 +562,16 @@ static MemTxResult next_scc_area_read(void *opaque, hwaddr addr,
     } else if (off < 8) {
         *data = extract32(s->scc_clock, (8 - off - size) * 8, size * 8);
     } else if (off >= 0x100 && off < 0x104) {
-        /* RAMDAC: filled in by the colour frame buffer */
-        *data = 0;
+        uint64_t val = 0;
+
+        for (unsigned i = 0; i < size && s->ramdac_mr; i++) {
+            uint64_t b;
+
+            memory_region_dispatch_read(s->ramdac_mr, (off + i) & 3, &b,
+                                        MO_8, attrs);
+            val = (val << 8) | (b & 0xff);
+        }
+        *data = val;
     } else if (off == 0x180 || off == 0x190 || off == 0x198) {
         *data = 0;
     } else {
@@ -587,7 +597,11 @@ static MemTxResult next_scc_area_write(void *opaque, hwaddr addr,
         s->scc_clock = deposit32(s->scc_clock, (8 - off - size) * 8,
                                  size * 8, val);
     } else if (off >= 0x100 && off < 0x104) {
-        /* RAMDAC */
+        for (unsigned i = 0; i < size && s->ramdac_mr; i++) {
+            memory_region_dispatch_write(s->ramdac_mr, (off + i) & 3,
+                                         (val >> (8 * (size - 1 - i))) & 0xff,
+                                         MO_8, attrs);
+        }
     } else if (off == 0x180) {
         s->col_vid = val >> (8 * (size - 1));
         if (s->col_vid & VID_CMD_CLEAR_INT) {
@@ -990,6 +1004,7 @@ struct NeXTState {
     NeXTFDCState fdc;
     NeXTDSPState dsp;
     NeXTSoundState sound;
+    BT463State ramdac;
     NeXTPrinterState printer;
     ESCCState escc;
     NeXTPC pc;
@@ -1246,6 +1261,14 @@ static void next_machine_init(MachineState *machine)
     qdev_prop_set_bit(dev, "color", nc->color);
     qdev_prop_set_bit(dev, "new-rtc", m->new_rtc);
     m->pc.escc_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->escc), 0);
+
+    /* The colour machines have a Bt463 RAMDAC */
+    if (nc->color) {
+        object_initialize_child(OBJECT(m), "ramdac", &m->ramdac, TYPE_BT463);
+        sysbus_realize(SYS_BUS_DEVICE(&m->ramdac), &error_fatal);
+        m->pc.ramdac_mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->ramdac),
+                                                 0);
+    }
     sysbus_realize(sbd, &error_fatal);
     memory_region_add_subregion(&m->io, NEXT_IO_INTSTAT,
                                 sysbus_mmio_get_region(sbd, 0));
