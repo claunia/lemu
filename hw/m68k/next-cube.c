@@ -1427,6 +1427,8 @@ static void next_machine_init(MachineState *machine)
         memory_region_add_subregion(&m->io, NEXT_IO_MO, &m->mo_dummy);
     } else {
         object_initialize_child(OBJECT(m), "mo", &m->mo, TYPE_NEXT_MO);
+        object_property_set_link(OBJECT(&m->mo), "dma", OBJECT(&m->dma),
+                                 &error_abort);
         sysbus_realize(SYS_BUS_DEVICE(&m->mo), &error_fatal);
         memory_region_add_subregion(&m->io, NEXT_IO_MO,
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->mo), 0));
