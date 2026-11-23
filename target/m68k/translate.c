@@ -4674,6 +4674,81 @@ DISAS_INSN(ptest)
 }
 #endif
 
+#if !defined(CONFIG_USER_ONLY)
+/*
+ * 68030 MMU instructions: coprocessor 0, general type, with an extension
+ * word: PMOVE (types 0, 2 and 3), PFLUSH and PLOAD (type 1) and PTEST
+ * (type 4).
+ */
+DISAS_INSN(mmu030)
+{
+    uint16_t ext = read_im16(env, s);
+    int type = ext >> 13;
+    int mode = extract32(insn, 3, 3);
+    int reg0 = REG(insn, 0);
+    TCGv addr = NULL_QREG;
+    int size = 4;
+
+    if (IS_USER(s)) {
+        gen_exception(s, s->base.pc_next, EXCP_PRIVILEGE);
+        return;
+    }
+
+    switch (type) {
+    case 0: /* PMOVE TT0, TT1 */
+    case 2: /* PMOVE TC, SRP, CRP */
+    case 3: /* PMOVE MMUSR */
+        if (type == 2 && ((ext >> 10) & 7) >= 2) {
+            size = 8;
+        } else if (type == 3) {
+            size = 2;
+        }
+        if (mode == 3) {        /* (An)+ */
+            addr = tcg_temp_new();
+            tcg_gen_mov_i32(addr, get_areg(s, reg0));
+            tcg_gen_addi_i32(get_areg(s, reg0), get_areg(s, reg0), size);
+        } else if (mode == 4) { /* -(An) */
+            addr = tcg_temp_new();
+            tcg_gen_subi_i32(addr, get_areg(s, reg0), size);
+            tcg_gen_mov_i32(get_areg(s, reg0), addr);
+        } else {
+            addr = gen_lea_mode(env, s, mode, reg0, OS_LONG);
+        }
+        if (IS_NULL_QREG(addr)) {
+            gen_addr_fault(s);
+            return;
+        }
+        gen_helper_pmove(tcg_env, tcg_constant_i32(ext), addr);
+        break;
+    case 1: /* PFLUSH, PLOAD */
+        if (((ext >> 10) & 7) == 0 || ((ext >> 10) & 7) == 6) {
+            addr = gen_lea_mode(env, s, mode, reg0, OS_LONG);
+            if (IS_NULL_QREG(addr)) {
+                gen_addr_fault(s);
+                return;
+            }
+        } else {
+            addr = tcg_constant_i32(0);
+        }
+        gen_helper_pflush030(tcg_env, tcg_constant_i32(ext), addr);
+        break;
+    case 4: /* PTEST */
+        addr = gen_lea_mode(env, s, mode, reg0, OS_LONG);
+        if (IS_NULL_QREG(addr)) {
+            gen_addr_fault(s);
+            return;
+        }
+        gen_helper_ptest030(tcg_env, tcg_constant_i32(ext), addr);
+        break;
+    default:
+        gen_exception(s, s->base.pc_next, EXCP_LINEF);
+        return;
+    }
+    /* the translation may have changed */
+    gen_exit_tb(s);
+}
+#endif
+
 DISAS_INSN(wddata)
 {
     gen_exception(s, s->base.pc_next, EXCP_PRIVILEGE);
@@ -5406,6 +5481,22 @@ DISAS_INSN(frestore)
     if (m68k_feature(s->env, M68K_FEATURE_M68040)) {
         SRC_EA(env, addr, OS_LONG, 0, NULL);
         /* FIXME: check the state frame */
+    } else if (m68k_feature(s->env, M68K_FEATURE_FPU)) {
+        /* 68881/68882: the frame says its own size */
+        int mode = extract32(insn, 3, 3);
+        int reg0 = REG(insn, 0);
+        TCGv size = tcg_temp_new();
+
+        addr = mode == 3 ? get_areg(s, reg0)
+                         : gen_lea_mode(env, s, mode, reg0, OS_LONG);
+        if (mode == 4 || IS_NULL_QREG(addr)) {
+            gen_addr_fault(s);
+            return;
+        }
+        gen_helper_frestore882(size, tcg_env, addr);
+        if (mode == 3) {
+            tcg_gen_add_i32(get_areg(s, reg0), get_areg(s, reg0), size);
+        }
     } else {
         disas_undef(env, s, insn);
     }
@@ -5422,6 +5513,27 @@ DISAS_INSN(fsave)
         /* always write IDLE */
         TCGv idle = tcg_constant_i32(0x41000000);
         DEST_EA(env, insn, OS_LONG, idle, NULL);
+    } else if (m68k_feature(s->env, M68K_FEATURE_FPU)) {
+        /* 68882: always an idle frame, 4 + 0x38 bytes */
+        int mode = extract32(insn, 3, 3);
+        int reg0 = REG(insn, 0);
+        TCGv addr;
+
+        if (mode == 4) {
+            addr = tcg_temp_new();
+            tcg_gen_subi_i32(addr, get_areg(s, reg0), 4 + 0x38);
+            tcg_gen_mov_i32(get_areg(s, reg0), addr);
+        } else if (mode == 3) {
+            gen_addr_fault(s);
+            return;
+        } else {
+            addr = gen_lea_mode(env, s, mode, reg0, OS_LONG);
+            if (IS_NULL_QREG(addr)) {
+                gen_addr_fault(s);
+                return;
+            }
+        }
+        gen_helper_fsave882(tcg_env, addr);
     } else {
         disas_undef(env, s, insn);
     }
@@ -6044,6 +6156,7 @@ void register_m68k_insns (CPUM68KState *env)
     INSN(cinv,      f400, ff20, M68040);
     INSN(pflush,    f500, ffe0, M68040);
     INSN(ptest,     f548, ffd8, M68040);
+    INSN(mmu030,    f000, ffc0, M68030);
     INSN(wddata,    fb00, ff00, CF_ISA_A);
     INSN(wdebug,    fbc0, ffc0, CF_ISA_A);
 #endif

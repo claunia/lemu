@@ -142,11 +142,21 @@ typedef struct CPUArchState {
         uint32_t mmusr;
     } mmu;
 
+    /* 68030 MMU */
+    struct {
+        uint32_t tc;
+        uint64_t crp;
+        uint64_t srp;
+        uint32_t tt[2];
+        uint16_t mmusr;
+    } mmu030;
+
     /* Control registers.  */
     uint32_t vbr;
     uint32_t mbar;
     uint32_t rambar0;
     uint32_t cacr;
+    uint32_t caar;      /* 68020/68030 */
     uint32_t sfc;
     uint32_t dfc;
 
@@ -577,6 +587,18 @@ static inline bool m68k_feature(CPUM68KState *env, int feature)
 }
 
 void register_m68k_insns (CPUM68KState *env);
+
+#ifndef CONFIG_USER_ONLY
+/* 68030 MMU, in mmu030.c */
+bool m68k_mmu030_enabled(CPUM68KState *env);
+bool m68k_mmu030_get_phys(CPUM68KState *env, uint32_t addr, int access_type,
+                          hwaddr *phys);
+bool m68k_mmu030_tlb_fill(CPUState *cs, vaddr address, int size,
+                          MMUAccessType qemu_access_type, int mmu_idx,
+                          bool probe, uintptr_t retaddr);
+void m68k_mmu030_fault_ssw(CPUM68KState *env, uint32_t addr, int size,
+                           MMUAccessType qemu_access_type, int mmu_idx);
+#endif
 
 enum {
     /* 1 bit to define user level / supervisor access */
