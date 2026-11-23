@@ -540,9 +540,11 @@ static void next_rtc_realize(DeviceState *dev, Error **errp)
         /* an empty file gets the defaults */
         s->nvram_loaded = !buffer_is_zero(buf, sizeof(buf));
     }
-    if (s->new_chip) {
-        s->nstatus = NRTC_FIRSTUP;
-    }
+    /*
+     * The clock has been running all along: with "first up" the ROM
+     * would take it for a new battery, stop it and set it to 0.
+     */
+    s->nstatus = 0;
 }
 
 static void next_rtc_init(Object *obj)
