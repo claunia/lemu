@@ -69,6 +69,7 @@ blobs = [
   'palcode-clipper',
   'u-boot.e500',
   'u-boot-sam460.bin',
+  'u-boot-amigaone.bin',
   'qemu_vga.ndrv',
   'edk2-licenses.txt',
   'hppa-firmware.img',
