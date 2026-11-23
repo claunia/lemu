@@ -20,6 +20,8 @@ config NEXTCUBE
     select ESCC
     select EMPTY_SLOT
     select ESP
+    select ADB
+    select OR_IRQ
 
 config Q800
     bool
