@@ -52,6 +52,7 @@
 #include "hw/audio/next-sound.h"
 #include "hw/display/bt463.h"
 #include "hw/m68k/next-tmc.h"
+#include "hw/m68k/next-ncc.h"
 #include "hw/core/or-irq.h"
 #include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
@@ -1011,6 +1012,7 @@ struct NeXTState {
     NeXTSoundState sound;
     BT463State ramdac;
     NeXTTMCState tmc;
+    NeXTNCCState ncc;
     OrIRQState nmi_or;
     MemoryRegion mo_dummy;
     NeXTPrinterState printer;
@@ -1021,6 +1023,7 @@ struct NeXTState {
     bool new_rtc;
     bool net_services;
     char *nfs_share;
+    bool nitro;
 };
 
 /*
@@ -1496,6 +1499,20 @@ static void next_machine_init(MachineState *machine)
         qdev_connect_gpio_out_named(dev, "vbl", 0,
                                     qdev_get_gpio_in_named(DEVICE(&m->tmc),
                                                            "vbl", 0));
+        /* the 40 MHz boards have a second level cache */
+        if (m->nitro) {
+            SysBusDevice *ncc;
+
+            object_initialize_child(OBJECT(m), "ncc", &m->ncc, TYPE_NEXT_NCC);
+            ncc = SYS_BUS_DEVICE(&m->ncc);
+            sysbus_realize(ncc, &error_fatal);
+            memory_region_add_subregion(sysmem, NEXT_NCC_BASE,
+                                        sysbus_mmio_get_region(ncc, 0));
+            memory_region_add_subregion(sysmem, NEXT_NCC_TAG_BASE,
+                                        sysbus_mmio_get_region(ncc, 1));
+            memory_region_add_subregion(sysmem, NEXT_NCC_CACHE_BASE,
+                                        sysbus_mmio_get_region(ncc, 2));
+        }
         adb = qdev_get_child_bus(DEVICE(&m->tmc), "adb.0");
         qdev_realize_and_unref(qdev_new(TYPE_ADB_KEYBOARD), adb,
                                &error_fatal);
@@ -1622,6 +1639,20 @@ static void next_set_nfs_share(Object *obj, const char *value, Error **errp)
     m->nfs_share = value && *value ? g_strdup(value) : NULL;
 }
 
+static bool next_get_nitro(Object *obj, Error **errp)
+{
+    return NEXT_MACHINE(obj)->nitro;
+}
+
+static void next_set_nitro(Object *obj, bool value, Error **errp)
+{
+    if (value && !NEXT_MACHINE_GET_CLASS(obj)->turbo) {
+        error_setg(errp, "only the Turbo machines have Nitro boards");
+        return;
+    }
+    NEXT_MACHINE(obj)->nitro = value;
+}
+
 static void next_machine_instance_init(Object *obj)
 {
     NeXTMachineClass *nc = NEXT_MACHINE_GET_CLASS(obj);
@@ -1651,6 +1682,11 @@ static void next_machine_class_init(ObjectClass *oc, const void *data)
         "time requests (default: on)");
     object_class_property_add_str(oc, "nfs-share", next_get_nfs_share,
                                   next_set_nfs_share);
+    object_class_property_add_bool(oc, "nitro", next_get_nitro,
+                                   next_set_nitro);
+    object_class_property_set_description(oc, "nitro",
+        "On the Turbo machines, a 40 MHz Nitro board with its cache "
+        "controller");
     object_class_property_set_description(oc, "nfs-share",
         "A host folder to share by NFS on the user network; NeXTSTEP "
         "mounts it on /Net");
