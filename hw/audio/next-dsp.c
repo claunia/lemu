@@ -10,7 +10,12 @@
  * the NeXT's side, from Previous's dsp.c (GPL-2.0-or-later).
  *
  * The DSP runs behind the CPU: a timer, and every access to the host
- * port, let it catch up with the virtual clock.
+ * port, let it catch up with the virtual clock. NeXTSTEP leaves it running
+ * a program that waits for the host in a loop of jclr and jset
+ * instructions. Once the DSP comes back to the same instruction with all
+ * its registers as they were, twice, only the host port or the DMA can
+ * end that wait, so it stops there until one of them is used, instead of
+ * spinning at 25 MHz.
  *
  * This code is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -160,11 +165,35 @@ static void next_dsp_handle_dma(NeXTDSPState *s)
 
 /* ---- running ---- */
 
+/* The longest wait loop the DSP is caught in, in instructions */
+#define DSP_WAIT_LOOP       8
+
+/*
+ * Whether the DSP is back where it was at the last snapshot, with the same
+ * registers, and no DMA transfer is ready for it. A DO loop counts in LC,
+ * one of the registers; a REP keeps the PC on itself as it counts.
+ */
+static bool next_dsp_waits(NeXTDSPState *s)
+{
+    return dsp_core.pc == s->wait_pc && !dsp_core.pc_on_rep &&
+           !memcmp(dsp_core.registers, s->wait_regs, sizeof(s->wait_regs)) &&
+           !(dsp_core.dma_mode && dsp_core.dma_request &&
+             next_dsp_dma_ready(s));
+}
+
+static void next_dsp_wait_snapshot(NeXTDSPState *s)
+{
+    s->wait_pc = dsp_core.pc;
+    memcpy(s->wait_regs, dsp_core.registers, sizeof(s->wait_regs));
+    s->wait_len = 0;
+}
+
 static void next_dsp_run(NeXTDSPState *s)
 {
     int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    int same = 0;
 
-    if (!dsp_core.running) {
+    if (!dsp_core.running || s->parked) {
         s->clocks = 0;
         s->last_ns = now;
         return;
@@ -174,10 +203,38 @@ static void next_dsp_run(NeXTDSPState *s)
     s->last_ns = now;
     s->clocks = MIN(s->clocks, DSP_MAX_CLOCKS);
 
+    next_dsp_wait_snapshot(s);
     while (s->clocks > 0 && dsp_core.running) {
         dsp56k_execute_instruction();
         s->clocks -= dsp_core.instr_cycle;
         next_dsp_handle_dma(s);
+        /* twice round the same loop: it goes on until the host or the DMA */
+        if (next_dsp_waits(s)) {
+            same++;
+            s->wait_len = 0;
+        } else if (++s->wait_len == DSP_WAIT_LOOP) {
+            same = 0;
+            next_dsp_wait_snapshot(s);
+        }
+        if (same == 2) {
+            s->parked = true;
+            s->clocks = 0;
+            timer_del(s->timer);
+            break;
+        }
+    }
+}
+
+/* The host or the DMA did something the DSP may wait for */
+static void next_dsp_wake(NeXTDSPState *s)
+{
+    if (s->parked) {
+        s->parked = false;
+        s->last_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    }
+    if (dsp_core.running && !timer_pending(s->timer)) {
+        timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                            DSP_SLICE_NS);
     }
 }
 
@@ -186,14 +243,20 @@ static void next_dsp_timer(void *opaque)
     NeXTDSPState *s = opaque;
 
     next_dsp_run(s);
-    if (dsp_core.running) {
+    if (dsp_core.running && !s->parked) {
         timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
                             DSP_SLICE_NS);
     }
 }
 
+static void next_dsp_dma_kick(void *opaque, NeXTDMAChannel ch)
+{
+    next_dsp_wake(opaque);
+}
+
 void next_dsp_set_running(NeXTDSPState *s, bool run, int mode)
 {
+    s->parked = false;
     if (run) {
         dsp_core_start(mode, 1);
         s->last_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -227,8 +290,13 @@ static uint64_t next_dsp_read(void *opaque, hwaddr addr, unsigned size)
 {
     NeXTDSPState *s = opaque;
 
+    uint8_t val;
+
     next_dsp_run(s);
-    return dsp_core_read_host(addr & 7);
+    val = dsp_core_read_host(addr & 7);
+    /* reading the data may let the DSP send more */
+    next_dsp_wake(s);
+    return val;
 }
 
 static void next_dsp_write(void *opaque, hwaddr addr, uint64_t val,
@@ -239,10 +307,7 @@ static void next_dsp_write(void *opaque, hwaddr addr, uint64_t val,
     next_dsp_run(s);
     dsp_core_write_host(addr & 7, val);
     /* the DSP may have been waiting for this */
-    if (dsp_core.running && !timer_pending(s->timer)) {
-        timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-                            DSP_SLICE_NS);
-    }
+    next_dsp_wake(s);
 }
 
 static const MemoryRegionOps next_dsp_ops = {
@@ -284,6 +349,7 @@ static void next_dsp_realize(DeviceState *dev, Error **errp)
     dsp_core_init(next_dsp_hreq);
     dsp56k_init_cpu();
     s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, next_dsp_timer, s);
+    next_dma_set_client(s->dma, NEXT_DMA_DSP, next_dsp_dma_kick, NULL, s);
 }
 
 static void next_dsp_init(Object *obj)
@@ -412,6 +478,7 @@ static const VMStateDescription next_dsp_vmstate = {
         VMSTATE_BOOL(unpacked, NeXTDSPState),
         VMSTATE_INT64(clocks, NeXTDSPState),
         VMSTATE_TIMER_PTR(timer, NeXTDSPState),
+        VMSTATE_BOOL(parked, NeXTDSPState),
         VMSTATE_END_OF_LIST()
     },
 };

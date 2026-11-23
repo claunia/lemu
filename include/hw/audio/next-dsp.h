@@ -54,6 +54,10 @@ struct NeXTDSPState {
     QEMUTimer *timer;
     int64_t last_ns;
     int64_t clocks;
+    bool parked;            /* waiting in place for the host or the DMA */
+    uint16_t wait_pc;       /* where the DSP was, to find its wait loop */
+    uint32_t wait_regs[64];
+    int wait_len;
 };
 
 /* The board's controls in SCR2 */
