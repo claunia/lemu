@@ -66,6 +66,7 @@ struct NeXTSCSIState {
     const NeXTSCSIFloppyOps *floppy_ops;
     void *floppy_opaque;
     bool floppy_select;
+    bool is_53c90a;
 };
 
 void next_scsi_set_floppy(NeXTSCSIState *s, const NeXTSCSIFloppyOps *ops,

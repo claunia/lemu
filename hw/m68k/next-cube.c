@@ -1387,6 +1387,7 @@ static void next_machine_init(MachineState *machine)
     object_initialize_child(OBJECT(m), "scsi", &m->scsi, TYPE_NEXT_SCSI);
     object_property_set_link(OBJECT(&m->scsi), "dma", OBJECT(&m->dma),
                              &error_abort);
+    qdev_prop_set_bit(DEVICE(&m->scsi), "53c90a", !is_030);
     sysbus_realize(SYS_BUS_DEVICE(&m->scsi), &error_fatal);
     memory_region_add_subregion(&m->io, NEXT_IO_SCSI,
                         sysbus_mmio_get_region(SYS_BUS_DEVICE(&m->scsi), 0));

@@ -434,7 +434,10 @@ static MemTxResult next_scsi_read(void *opaque, hwaddr addr, uint64_t *data,
     NeXTSCSIState *s = opaque;
 
     addr &= 0x2f;
-    if (addr < 0x10) {
+    if (addr == 0x0b && !s->is_53c90a) {
+        /* the 53C90 has no configuration register 2 */
+        *data = 0;
+    } else if (addr < 0x10) {
         *data = esp_reg_read(next_scsi_esp(s), addr);
     } else if (addr == 0x20 || addr == 0x21) {
         *data = next_scsi_csr_read(s, addr & 1, size);
@@ -450,7 +453,9 @@ static MemTxResult next_scsi_write(void *opaque, hwaddr addr, uint64_t data,
     NeXTSCSIState *s = opaque;
 
     addr &= 0x2f;
-    if (addr < 0x10) {
+    if (addr == 0x0b && !s->is_53c90a) {
+        /* nothing there on the 53C90 */
+    } else if (addr < 0x10) {
         esp_reg_write(next_scsi_esp(s), addr, data);
         /* A command may have started a transfer */
         next_scsi_pump(s);
@@ -555,6 +560,8 @@ static const VMStateDescription next_scsi_vmstate = {
 static const Property next_scsi_properties[] = {
     DEFINE_PROP_LINK("dma", NeXTSCSIState, dma, TYPE_NEXT_DMA,
                      NeXTDMAState *),
+    /* the 68040 boards have a 53C90A, the 68030 board a 53C90 */
+    DEFINE_PROP_BOOL("53c90a", NeXTSCSIState, is_53c90a, true),
 };
 
 static void next_scsi_class_init(ObjectClass *klass, const void *data)
