@@ -363,6 +363,14 @@ static uint32_t *next_dma_reg(NeXTDMAState *s, hwaddr addr, int *chp,
     int ch;
 
     *init = false;
+    /*
+     * The Turbo Ethernet receive channel has its saved limit (the end of
+     * the last packet) here, where the MO channel is on the others.
+     */
+    if (s->turbo && off == 0x050) {
+        *chp = NEXT_DMA_EN_RX;
+        return &s->ch[NEXT_DMA_EN_RX].saved_limit;
+    }
     if (off >= 0x200) {
         ch = next_dma_find(off & 0x1f0 & ~0xf);
         if (ch < 0 || !next_dma_has_init[ch] || reg != 0) {
@@ -391,11 +399,6 @@ static uint32_t *next_dma_reg(NeXTDMAState *s, hwaddr addr, int *chp,
         case 2: return &s->ch[ch].saved_start;
         default: return &s->ch[ch].saved_stop;
         }
-    }
-    /* The Turbo Ethernet receive channel has its saved limit here */
-    if (s->turbo && off == 0x050) {
-        *chp = NEXT_DMA_EN_RX;
-        return &s->ch[NEXT_DMA_EN_RX].saved_limit;
     }
     return NULL;
 }
