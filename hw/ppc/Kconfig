@@ -91,6 +91,7 @@ config AMIGAONE
     select ARTICIA
     select VT82C686
     select SMBUS_EEPROM
+    select TC90X
 
 config PEGASOS
     bool

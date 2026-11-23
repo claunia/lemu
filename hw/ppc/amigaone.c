@@ -391,6 +391,10 @@ static void amigaone_init(MachineState *machine)
     pci_ide_create_devs(PCI_DEVICE(object_resolve_path_component(via, "ide")));
     pci_vga_init(pci_bus);
 
+    /* on board 3Com 3C920 Ethernet, in the slot routed for it */
+    pci_init_nic_in_slot(pci_bus, "3c905c", NULL, "06");
+    pci_init_nic_devices(pci_bus, MACHINE_GET_CLASS(machine)->default_nic);
+
     if (!machine->kernel_filename) {
         return;
     }
@@ -446,6 +450,7 @@ static void amigaone_machine_init(MachineClass *mc)
     mc->default_display = "std";
     mc->default_ram_id = "ram";
     mc->default_ram_size = 512 * MiB;
+    mc->default_nic = "3c905c";
     machine_add_audiodev_property(mc);
 }
 
