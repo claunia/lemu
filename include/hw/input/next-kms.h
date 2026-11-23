@@ -54,6 +54,7 @@ struct NeXTKMSState {
     QemuInputHandlerState *hs;
 
     bool turbo;
+    bool input;     /* the keyboard and mouse are on this link */
 
     uint8_t status_snd;
     uint8_t status_km;

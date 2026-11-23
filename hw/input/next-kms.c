@@ -731,7 +731,10 @@ static void next_kms_realize(DeviceState *dev, Error **errp)
 {
     NeXTKMSState *s = NEXT_KMS(dev);
 
-    s->hs = qemu_input_handler_register(dev, &next_kms_handler);
+    /* on the Turbo machines the keyboard and mouse are on ADB */
+    if (s->input) {
+        s->hs = qemu_input_handler_register(dev, &next_kms_handler);
+    }
 }
 
 static void next_kms_unrealize(DeviceState *dev)
@@ -782,6 +785,7 @@ static const VMStateDescription next_kms_vmstate = {
 
 static const Property next_kms_properties[] = {
     DEFINE_PROP_BOOL("turbo", NeXTKMSState, turbo, false),
+    DEFINE_PROP_BOOL("input", NeXTKMSState, input, true),
 };
 
 static void next_kms_class_init(ObjectClass *oc, const void *data)
