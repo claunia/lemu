@@ -58,19 +58,10 @@
 #define KMSCMD_SO_REQ       0x07
 #define KMSCMD_SO_UNDR      0x0F
 
-/* Commands from the CPU to the monitor */
+/* Commands from the CPU to the monitor: the sound ones are in the header */
 #define KMSCMD_RESET        0xFF
-#define KMSCMD_ASNDOUT      0xC7
 #define KMSCMD_KMPOLL       0xC6
 #define KMSCMD_KMREG        0xC5
-#define KMSCMD_CTRLOUT      0xC4
-#define KMSCMD_VOLCTRL      0xC2
-#define KMSCMD_SND_IN       0x03
-#define KMSCMD_SND_OUT      0x07
-#define KMSCMD_SIO_MASK     0xC7
-#define KMSCMD_SIO_ENABLE   0x08
-#define KMSCMD_SIO_DBL_SMPL 0x10
-#define KMSCMD_SIO_ZERO     0x20
 
 /* Address byte of keyboard and mouse data */
 #define KM_NO_RESPONSE      0x40
@@ -310,9 +301,13 @@ static void next_kms_command_out(NeXTKMSState *s, uint8_t command,
     }
 }
 
-void next_kms_sound_request(NeXTKMSState *s)
+bool next_kms_sound_request(NeXTKMSState *s)
 {
+    if (!(s->status_tx & KMS_ENABLE)) {
+        return false;
+    }
     next_kms_command_out(s, KMSCMD_SO_REQ, 0);
+    return true;
 }
 
 void next_kms_sound_underrun(NeXTKMSState *s)
@@ -326,9 +321,13 @@ void next_kms_sound_in_overrun(NeXTKMSState *s)
     next_kms_set_irq(s, NEXT_KMS_IRQ_SOUND_OVRUN, true);
 }
 
-void next_kms_codec_in(NeXTKMSState *s)
+bool next_kms_codec_in(NeXTKMSState *s)
 {
+    if (!(s->status_tx & KMS_ENABLE)) {
+        return false;
+    }
     next_kms_command_out(s, KMSCMD_CODEC_IN, 0);
+    return true;
 }
 
 /* ---- keyboard and mouse ---- */

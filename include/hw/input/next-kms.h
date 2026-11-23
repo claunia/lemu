@@ -28,6 +28,17 @@ enum {
     NEXT_KMS_NUM_IRQS
 };
 
+/* Sound commands from the CPU to the monitor */
+#define KMSCMD_ASNDOUT      0xC7    /* one sample, in the data */
+#define KMSCMD_CTRLOUT      0xC4    /* volume control logic */
+#define KMSCMD_VOLCTRL      0xC2    /* volume, on newer monitors */
+#define KMSCMD_SND_IN       0x03
+#define KMSCMD_SND_OUT      0x07
+#define KMSCMD_SIO_MASK     0xC7
+#define KMSCMD_SIO_ENABLE   0x08
+#define KMSCMD_SIO_DBL_SMPL 0x10
+#define KMSCMD_SIO_ZERO     0x20
+
 /* A sound command for the monitor: command 0 stops all sound */
 typedef void (*NeXTKMSSoundCommand)(void *opaque, uint8_t command,
                                     uint32_t data);
@@ -80,10 +91,13 @@ void next_kms_set_sound(NeXTKMSState *s, NeXTKMSSoundCommand command,
 void next_kms_set_power_key(NeXTKMSState *s, NeXTKMSPowerKey fn,
                             void *opaque);
 
-/* From the sound hardware */
-void next_kms_sound_request(NeXTKMSState *s);
+/*
+ * From the sound hardware. The request and the codec data go only over an
+ * enabled link: they return false when it is off.
+ */
+bool next_kms_sound_request(NeXTKMSState *s);
 void next_kms_sound_underrun(NeXTKMSState *s);
 void next_kms_sound_in_overrun(NeXTKMSState *s);
-void next_kms_codec_in(NeXTKMSState *s);
+bool next_kms_codec_in(NeXTKMSState *s);
 
 #endif /* HW_INPUT_NEXT_KMS_H */
