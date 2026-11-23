@@ -83,8 +83,9 @@ static int64_t next_scsi_irq_delay(NeXTSCSIState *s)
 {
     ESPState *esp = &s->esp.esp;
 
+    /* the chip has already set the interrupt bit in its status */
     if (esp->rregs[ESP_RINTR] == INTR_DC && esp->rregs[ESP_RSEQ] == SEQ_0 &&
-        esp->rregs[ESP_RSTAT] == 0) {
+        (esp->rregs[ESP_RSTAT] & ~STAT_INT) == 0) {
         int64_t sto = esp->wregs[ESP_WSEL] ? esp->wregs[ESP_WSEL] : 256;
         int64_t ccf = esp->wregs[ESP_WCCF] & 7 ? esp->wregs[ESP_WCCF] & 7 : 8;
 
