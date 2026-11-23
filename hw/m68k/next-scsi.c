@@ -421,7 +421,14 @@ static void next_scsi_csr_write(void *opaque, hwaddr addr, uint64_t val,
         next_scsi_flush(s);
     }
     if (val & ESPCTRL_RESET) {
+        /*
+         * The ESP's reset clears its status without lowering its
+         * interrupt: drop the one it had, or it stays up for good.
+         */
         device_cold_reset(DEVICE(&s->esp));
+        timer_del(s->irq_timer);
+        s->esp_irq = false;
+        s->esp_irq_out = false;
     }
     next_scsi_update_irq(s);
 }
