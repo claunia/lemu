@@ -529,6 +529,7 @@
 
 
 /* Radeon command processor, memory controller and PCI GART */
+#define RADEON_CRTC2_VBLANK_STAT                BIT(9)
 #define RADEON_SW_INT_TEST                      BIT(25)
 #define RADEON_SW_INT_FIRE                      BIT(26)
 #define RADEON_RBBM_SOFT_RESET                  0x00f0

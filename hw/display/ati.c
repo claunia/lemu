@@ -385,7 +385,14 @@ static void ati_vga_vblank_irq(void *opaque)
 
     timer_mod(&s->vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
               NANOSECONDS_PER_SECOND / 60);
-    s->regs.gen_int_status |= CRTC_VBLANK_INT;
+    /*
+     * The status bits are set every frame, enabled or not: drivers poll
+     * them to wait for the vertical retrace (AmigaOS waits for VSYNC).
+     */
+    s->regs.gen_int_status |= CRTC_VBLANK_INT | CRTC_VSYNC_INT;
+    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+        s->regs.gen_int_status |= RADEON_CRTC2_VBLANK_STAT;
+    }
     ati_vga_update_irq(s);
 }
 
@@ -761,12 +768,7 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     }
     case GEN_INT_CNTL:
         s->regs.gen_int_cntl = data;
-        if (data & CRTC_VBLANK_INT) {
-            ati_vga_vblank_irq(s);
-        } else {
-            timer_del(&s->vblank_timer);
-            ati_vga_update_irq(s);
-        }
+        ati_vga_update_irq(s);
         break;
     case GEN_INT_STATUS:
     {
@@ -1435,7 +1437,11 @@ static void ati_vga_reset(DeviceState *dev)
 {
     ATIVGAState *s = ATI_VGA(dev);
 
-    timer_del(&s->vblank_timer);
+    /* the frame timer runs all the time, see ati_vga_vblank_irq() */
+    timer_mod(&s->vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+              NANOSECONDS_PER_SECOND / 60);
+    s->regs.gen_int_cntl = 0;
+    s->regs.gen_int_status = 0;
     ati_vga_update_irq(s);
 
     /* reset vga */
