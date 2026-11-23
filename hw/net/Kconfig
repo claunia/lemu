@@ -25,6 +25,11 @@ config PCNET_PCI
 config PCNET_COMMON
     bool
 
+config TC90X
+    bool
+    default y if PCI_DEVICES
+    depends on PCI
+
 config VIA_RHINE
     bool
     default y if PCI_DEVICES
