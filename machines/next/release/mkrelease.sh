@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Pack a NeXT kit: the disk, the NVRAM and the ROM, run.sh, run.cmd, README.txt and
 # qemu-system-m68k for macOS, Linux and Windows.
-# KIT is a folder next to this one: ns22computer, ns33station, ns33turbocolor or os42color.
+# KIT is a folder next to this one, such as ns22computer or os42color (see ../README.md).
 # VMDIR holds the kit's disk under the name run.sh gives it (ns33.qcow2, or .img for a raw
 # one), NeXT's ROM under the name run.sh gives it, and nvram.bin if the VM has one. It is
 # only read. The pack converts the disk to qcow2, which leaves out what was never written.

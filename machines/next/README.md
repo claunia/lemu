@@ -1,9 +1,9 @@
 # NeXT 68k machines
 
 **TL;DR** LEMU emulates the seven 68k NeXT machines, from the 68030 NeXT
-Computer to the NeXTstation Turbo Color, with their own ROMs. NeXTSTEP
-2.2, 3.3 and OPENSTEP 4.2 boot to the Workspace. `*/run.sh` starts the
-kits below.
+Computer to the NeXTstation Turbo Color, with their own ROMs. Every
+release from NeXTSTEP 0.8 to OPENSTEP 4.2 boots, and NeXTSTEP 2.2 and 3.3
+install from their CDs. `*/run.sh` starts the kits below.
 
 The device models are ports of the [Previous](https://previous.alternative-system.com/)
 emulator's, as QOM devices; `hw/m68k/next-cube.c` is the board of all
@@ -30,12 +30,26 @@ seven.
 
 ## Kits
 
-| Kit (`<name>-lemu.tar.lz`) | Guest | Machine | ROM | Disk | telnet |
-|---|---|---|---|---|---|
-| [ns22computer](ns22computer/run.sh) | NeXTSTEP 2.2 | `next-computer` | `Rev_1.2.bin` | `ns22.qcow2` | 32223 |
-| [ns33station](ns33station/run.sh) | NeXTSTEP 3.3 | `next-station` | `Rev_2.5_v66.bin` | `ns33.qcow2` | 32323 |
-| [ns33turbocolor](ns33turbocolor/run.sh) | NeXTSTEP 3.3 | `next-station-turbo-color` | `Rev_3.3_v74.bin` | `ns33.qcow2` | 32333 |
-| [os42color](os42color/run.sh) | OPENSTEP 4.2 | `next-station-color` | `Rev_2.5_v66.bin` | `os42.qcow2` | 32423 |
+| Kit (`<name>-lemu.tar.lz`) | Guest | Machine | ROM | Disk | telnet | Starts at |
+|---|---|---|---|---|---|---|
+| [ns08computer](ns08computer/run.sh) | NeXTSTEP 0.8 | `next-computer` | `Rev_1.2.bin` | `ns08.qcow2` | 32083 | desktop, as me |
+| [ns09computer](ns09computer/run.sh) | NeXTSTEP 0.9 | `next-computer` | `Rev_1.2.bin` | `ns09.qcow2` | 32093 | desktop, as me |
+| [ns10computer](ns10computer/run.sh) | NeXTSTEP 1.0 | `next-computer` | `Rev_1.2.bin` | `ns10.qcow2` | 32103 | Workspace, as me |
+| [ns10acomputer](ns10acomputer/run.sh) | NeXTSTEP 1.0a | `next-computer` | `Rev_1.2.bin` | `ns10a.qcow2` | 32104 | Workspace, as me |
+| [ns20cube](ns20cube/run.sh) | NeXTSTEP 2.0 | `next-cube` | `Rev_2.5_v66.bin` | `ns20.qcow2` | 32203 | Workspace, as me |
+| [ns21color](ns21color/run.sh) | NeXTSTEP 2.1 | `next-station-color` | `Rev_2.5_v66.bin` | `ns21.qcow2` | 32213 | Workspace, as me |
+| [ns22computer](ns22computer/run.sh) | NeXTSTEP 2.2 | `next-computer` | `Rev_1.2.bin` | `ns22.qcow2` | 32223 | Workspace, as me |
+| [ns31turbo](ns31turbo/run.sh) | NeXTSTEP 3.1 | `next-station-turbo` | `Rev_3.3_v74.bin` | `ns31.qcow2` | 32313 | first-boot setup |
+| [ns32cube](ns32cube/run.sh) | NeXTSTEP 3.2 | `next-cube` | `Rev_2.5_v66.bin` | `ns32.qcow2` | 32320 | login window (root) |
+| [ns33station](ns33station/run.sh) | NeXTSTEP 3.3 | `next-station` | `Rev_2.5_v66.bin` | `ns33.qcow2` | 32323 | login window (root) |
+| [ns33turbocolor](ns33turbocolor/run.sh) | NeXTSTEP 3.3 | `next-station-turbo-color` | `Rev_3.3_v74.bin` | `ns33.qcow2` | 32333 | login window (root) |
+| [os40cubeturbo](os40cubeturbo/run.sh) | OPENSTEP 4.0 | `next-cube-turbo` | `Rev_3.3_v74.bin` | `os40.qcow2` | 32403 | Workspace, as me |
+| [os42color](os42color/run.sh) | OPENSTEP 4.2 | `next-station-color` | `Rev_2.5_v66.bin` | `os42.qcow2` | 32423 | login window (root) |
+
+- The disks are installations made with the Previous emulator. The
+  NeXTSTEP 3.0 one is empty, so there is no 3.0 kit.
+- 0.8 and 0.9 do not answer telnet. The others refuse root logins over
+  telnet; on 2.2, me logs in, and on 3.x and 4.x, make a user first.
 
 Each kit also has `nvram.bin` (`-drive if=mtd`), the 64 bytes of NVRAM
 that the ROM keeps its settings in. [release/mkrelease.sh](release/mkrelease.sh)
@@ -96,10 +110,33 @@ The NeXT Computer and the NeXTcube have the 256 MB magneto-optical drive:
 - The image holds the disk as the drive sees it: sectors of 1296 bytes,
   with their ECC, from track 4096 on. A blank cartridge is
   `truncate -s 326032128 od.raw`; NeXTSTEP formats it.
-- `bo od` in the ROM monitor boots from it (`b od` on the 1.x ROMs).
+- `b od` in the ROM monitor boots from it.
   NeXTSTEP 2.2's BuildDisk makes a bootable one in about an hour.
 - `drive1` is the second drive. The monitor's `eject` and `change` swap
   cartridges.
+
+## Installing from CD
+
+The ROM monitor comes up when the boot disk is blank. There, `b fd`
+boots the floppy and `b sd(N,0,0)` boots the Nth SCSI drive, counted from
+the lowest SCSI ID. Give the installer a blank disk at ID 0 and the CD
+at ID 6:
+
+    -drive file=hd.qcow2,if=none,id=hd0 -device scsi-hd,scsi-id=0,drive=hd0
+    -drive file=cd.iso,if=none,id=cd0,format=raw,media=cdrom -device scsi-cd,scsi-id=6,drive=cd0
+
+- NeXTSTEP 2.2, on a 68040 machine: the CD with its 2.88 MB CDROM_Recover
+  floppy (`-drive file=fd.img,format=raw,if=floppy`). `b fd`, then
+  Rebuild boot device from CD-ROM. About 5 minutes.
+- NeXTSTEP 3.3, on a 68040 machine: `3.3_Moto_Boot_Disk.img`, a 1.44 MB
+  floppy, with the 3.3 release CD. `b fd`; the floppy copies a base
+  system to the disk, the disk boots into the installer, which copies the
+  packages from the CD. About 10 minutes.
+- NeXTSTEP 3.3 with the Turbo ROMs (3.x): no floppy, the ROM boots the CD
+  itself. With the CD the second drive, `b sd(1,0,0)sdmach rootdev=sd1`;
+  without `rootdev`, Mach takes the first disk for its root. ROM 2.5 v66
+  boots only from disks.
+- 3.3 then restarts into the first-boot setup, 2.2 into the Workspace.
 
 ## Idle
 
@@ -129,12 +166,19 @@ The NeXT Computer and the NeXTcube have the 256 MB magneto-optical drive:
   beeps through the sound hardware.
 - NeXTSTEP 2.2 boots from an optical disk that its BuildDisk made, on the
   NeXT Computer.
+- NeXTSTEP 2.2 installs from its CD and floppy on the NeXTstation (ROM
+  2.5 v66), and 3.3 from the release CD, with the floppy on the
+  NeXTstation and from the CD alone on the NeXTstation Turbo (ROM 3.3
+  v74). Each installed disk boots to the Workspace.
+- The nine kits from ns08computer to os40cubeturbo come up as the table
+  above says, through their run.sh; telnet answers on the seven from 1.0
+  on.
+- The q800 still boots A/UX 3.0.1, 3.1 and 3.1.1 and System 7.1 to 7.5.3
+  (the 68040 and ESP changes are shared).
 
 ## Gaps
 
 - The 0.8 v31 ROM fails its SCC test: it needs the SCC's DMA in loopback.
-- With no SCSI disk, the 68030 ROMs print many "sc: Didn't complete": the
-  ROM gives up on a selection before the emulated 250 ms timeout.
 - The DSP's SSI port (sound in at 44.1 kHz through the DSP) is not
   emulated.
 - NeXTdimension is not emulated.
