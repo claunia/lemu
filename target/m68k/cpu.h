@@ -168,6 +168,11 @@ typedef struct CPUArchState {
 
     /* Fields from here on are preserved across CPU reset. */
     uint64_t features;
+
+    /* Halt in Mach's idle loop on the NeXT machines, see nextstep_idle.c */
+    bool nextstep_idle;
+    int64_t nextstep_idle_since;    /* when the loop first found no work */
+    int64_t nextstep_idle_last;     /* when the loop last found no work */
 } CPUM68KState;
 
 /*

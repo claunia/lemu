@@ -137,5 +137,6 @@ DEF_HELPER_3(pflush030, void, env, i32, i32)
 DEF_HELPER_3(ptest030, void, env, i32, i32)
 DEF_HELPER_2(fsave882, void, env, i32)
 DEF_HELPER_2(frestore882, i32, env, i32)
+DEF_HELPER_5(nextstep_idle, void, env, i32, i32, i32, i32)
 DEF_HELPER_FLAGS_1(reset, TCG_CALL_NO_RWG, void, env)
 #endif

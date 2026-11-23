@@ -33,6 +33,8 @@
 #include "fpu/softfloat.h"
 #include "semihosting/semihost.h"
 
+#include "trace.h"
+
 #define HELPER_H "helper.h"
 #include "exec/helper-info.c.inc"
 #undef  HELPER_H
@@ -2994,6 +2996,104 @@ DISAS_INSN(addsubq)
     DEST_EA(env, insn, opsize, dest, &addr);
 }
 
+#ifndef CONFIG_USER_ONLY
+/*
+ * Mach on the NeXT spins in idle_thread() when it has nothing to run; see
+ * nextstep_idle.c. At a beq.s back to a loop top, read the loop and, when
+ * it is that one, let helper_nextstep_idle() halt the CPU. The checks are
+ * packed as the helper takes them.
+ */
+static void gen_nextstep_idle(DisasContext *s, CPUM68KState *env,
+                              uint32_t top, uint32_t branch)
+{
+    DisasContextBase *db = &s->base;
+    uint8_t sym[8];             /* what each address register holds */
+    uint32_t checks = 0, addr = 0, mask = 0xffffffff;
+    bool have_addr = false;
+    int n = 0, i;
+    uint32_t pc = top;
+
+    if (tb_page_addr0(db->tb) == -1 || top >= branch ||
+        branch - top > 64 || !translator_is_same_page(db, top) ||
+        !translator_is_same_page(db, branch)) {
+        return;
+    }
+    for (i = 0; i < 8; i++) {
+        sym[i] = 8 + i;
+    }
+    while (pc < branch) {
+        uint16_t w = translator_lduw_end(env, db, pc, MO_BE);
+        unsigned an = w & 7;
+
+        if ((w & 0xf1ff) == 0x41f9) {
+            /* lea abs.l,An */
+            if (have_addr) {
+                return;
+            }
+            addr = translator_ldl_end(env, db, pc + 2, MO_BE);
+            have_addr = true;
+            sym[(w >> 9) & 7] = 15;
+            pc += 6;
+        } else if ((w & 0xf1f8) == 0x2040) {
+            /* movea.l Dm,An */
+            sym[(w >> 9) & 7] = w & 7;
+            pc += 2;
+        } else if ((w & 0xfff8) == 0x4a90 || (w & 0xfff8) == 0x2010) {
+            /* tst.l (An) or move.l (An),d0, then bne.s out or the end */
+            uint16_t b;
+
+            if (n == 4 || an == 7) {
+                return;
+            }
+            checks |= (0x80 | sym[an]) << (n++ * 8);
+            pc += 2;
+            if (pc == branch) {
+                break;
+            }
+            b = translator_lduw_end(env, db, pc, MO_BE);
+            if ((b & 0xff00) != 0x6600 || (int8_t)b <= 0) {
+                return;
+            }
+            pc += 2;
+        } else if ((w & 0xfff8) == 0x2030 && n == 0 && an != 7) {
+            /*
+             * move.l (0,An,Dx.l*4),d0; moveq #m,Dk; and.l Dk,d0;
+             * beq.s over the code that handles the flags
+             */
+            uint16_t ext = translator_lduw_end(env, db, pc + 2, MO_BE);
+            uint16_t mq = translator_lduw_end(env, db, pc + 4, MO_BE);
+            uint16_t andl = translator_lduw_end(env, db, pc + 6, MO_BE);
+            uint16_t b = translator_lduw_end(env, db, pc + 8, MO_BE);
+            unsigned k = (mq >> 9) & 7;
+
+            if ((ext & 0x8fff) != 0x0c00 || (mq & 0xf100) != 0x7000 ||
+                andl != (0xc080 | k) || (b & 0xff00) != 0x6700 ||
+                (int8_t)b <= 0) {
+                return;
+            }
+            mask = (int8_t)mq;
+            checks |= 0x80 | (((ext >> 12) & 7) << 4) | sym[an];
+            n++;
+            pc += 10 + (int8_t)b;
+        } else {
+            return;
+        }
+    }
+    if (pc != branch || n == 0) {
+        return;
+    }
+    trace_m68k_nextstep_idle_match(branch, top, checks, addr, mask);
+
+    /* The helper reads the clock and may halt: the flags must be in env */
+    update_cc_op(s);
+    translator_io_start(db);
+    gen_helper_nextstep_idle(tcg_env, tcg_constant_i32(top),
+                             tcg_constant_i32(checks),
+                             tcg_constant_i32(addr),
+                             tcg_constant_i32(mask));
+}
+#endif
+
 DISAS_INSN(branch)
 {
     int32_t offset;
@@ -3012,6 +3112,12 @@ DISAS_INSN(branch)
         /* bsr */
         gen_push(s, tcg_constant_i32(s->pc));
     }
+#ifndef CONFIG_USER_ONLY
+    if (op == 7 && offset < 0 && (int8_t)insn != 0 && !IS_USER(s) &&
+        env->nextstep_idle && !(tb_cflags(s->base.tb) & CF_SINGLE_STEP)) {
+        gen_nextstep_idle(s, env, base + offset, base - 2);
+    }
+#endif
     if (op > 1) {
         /* Bcc */
         TCGLabel *l1 = gen_new_label();

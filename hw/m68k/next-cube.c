@@ -1127,6 +1127,7 @@ struct NeXTState {
     char *nfs_share;
     bool nitro;
     bool dsp_ram_expansion;
+    bool nextstep_idle;
 };
 
 /*
@@ -1365,6 +1366,7 @@ static void next_machine_init(MachineState *machine)
     }
 
     cpu = M68K_CPU(cpu_create(machine->cpu_type));
+    cpu->env.nextstep_idle = m->nextstep_idle;
     qemu_register_reset(next_cpu_reset, cpu);
 
     /* Device space */
@@ -1808,6 +1810,16 @@ static void next_set_dsp_ram(Object *obj, bool value, Error **errp)
     NEXT_MACHINE(obj)->dsp_ram_expansion = value;
 }
 
+static bool next_get_nextstep_idle(Object *obj, Error **errp)
+{
+    return NEXT_MACHINE(obj)->nextstep_idle;
+}
+
+static void next_set_nextstep_idle(Object *obj, bool value, Error **errp)
+{
+    NEXT_MACHINE(obj)->nextstep_idle = value;
+}
+
 static void next_machine_instance_init(Object *obj)
 {
     NeXTMachineClass *nc = NEXT_MACHINE_GET_CLASS(obj);
@@ -1815,6 +1827,7 @@ static void next_machine_instance_init(Object *obj)
     /* Turbo machines have the newer MCCS1850 clock */
     NEXT_MACHINE(obj)->new_rtc = nc->turbo;
     NEXT_MACHINE(obj)->net_services = true;
+    NEXT_MACHINE(obj)->nextstep_idle = true;
 }
 
 static void next_machine_class_init(ObjectClass *oc, const void *data)
@@ -1846,6 +1859,12 @@ static void next_machine_class_init(ObjectClass *oc, const void *data)
                                    next_set_dsp_ram);
     object_class_property_set_description(oc, "dsp-ram-expansion",
         "32K words of DSP memory instead of 8K (default: off)");
+    object_class_property_add_bool(oc, "nextstep-idle",
+                                   next_get_nextstep_idle,
+                                   next_set_nextstep_idle);
+    object_class_property_set_description(oc, "nextstep-idle",
+        "Halt the CPU in Mach's idle loop, which spins on a real NeXT "
+        "(default: on)");
     object_class_property_set_description(oc, "nfs-share",
         "A host folder to share by NFS on the user network; NeXTSTEP "
         "mounts it on /Net");
