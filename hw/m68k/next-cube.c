@@ -1008,6 +1008,7 @@ struct NeXTState {
     NeXTKMSState kms;
     NeXTMOState mo;
     NeXTFDCState fdc;
+    MemoryRegion fdc_ctrl;      /* 68030: control register only */
     NeXTDSPState dsp;
     NeXTSoundState sound;
     BT463State ramdac;
@@ -1063,14 +1064,37 @@ static void next_net_services(NeXTState *m, NeXTMachineClass *nc)
 }
 
 /* Split the RAM into the four banks with the SIMM sizes the model takes */
+static uint64_t next_fdc_ctrl_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return 0;
+}
+
+static void next_fdc_ctrl_write(void *opaque, hwaddr addr, uint64_t val,
+                                unsigned size)
+{
+}
+
+static const MemoryRegionOps next_fdc_ctrl_ops = {
+    .read = next_fdc_ctrl_read,
+    .write = next_fdc_ctrl_write,
+    .endianness = DEVICE_BIG_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 4,
+    .impl.min_access_size = 1,
+    .impl.max_access_size = 1,
+};
+
 static bool next_split_ram(NeXTMachineClass *nc, uint64_t ram_size,
                            uint32_t bank[4], Error **errp)
 {
     static const uint32_t mono_sizes[] = { 16 * MiB, 4 * MiB, 1 * MiB, 0 };
     static const uint32_t color_sizes[] = { 8 * MiB, 2 * MiB, 0 };
     static const uint32_t turbo_sizes[] = { 32 * MiB, 8 * MiB, 2 * MiB, 0 };
+    static const uint32_t computer_sizes[] = { 4 * MiB, 1 * MiB, 0 };
     const uint32_t *sizes = nc->turbo ? turbo_sizes :
-                            nc->color ? color_sizes : mono_sizes;
+                            nc->color ? color_sizes :
+                            nc->model == NEXT_MODEL_COMPUTER ? computer_sizes :
+                            mono_sizes;
     uint64_t left = ram_size;
 
     for (int i = 0; i < 4; i++) {
@@ -1409,8 +1433,15 @@ static void next_machine_init(MachineState *machine)
                            qdev_get_gpio_in(dev, NEXT_INT_DISK));
     }
 
-    /* Floppy: on the 68040 machines */
-    if (!is_030) {
+    /*
+     * Floppy: on the 68040 machines. The 68030 board has no 82077, but
+     * still has the external control register, which says no drive.
+     */
+    if (is_030) {
+        memory_region_init_io(&m->fdc_ctrl, OBJECT(m), &next_fdc_ctrl_ops,
+                              NULL, "next.floppy.ctrl", 1);
+        memory_region_add_subregion(&m->io, NEXT_IO_FLOPPY + 8, &m->fdc_ctrl);
+    } else {
         DriveInfo *fd = drive_get(IF_FLOPPY, 0, 0);
 
         object_initialize_child(OBJECT(m), "fdc", &m->fdc, TYPE_NEXT_FDC);
@@ -1722,6 +1753,14 @@ static void next_model_class_init(ObjectClass *oc, const void *data)
 
 static const NeXTModelInfo next_models[] = {
     {
+        .name = MACHINE_TYPE_NAME("next-computer"),
+        .desc = "NeXT Computer (68030)",
+        .model = NEXT_MODEL_COMPUTER,
+        .cube = true,
+        .cpu = M68K_CPU_TYPE_NAME("m68030"),
+        .rom = "Rev_1.2.bin",
+        .ram = 16 * MiB,
+    }, {
         .name = MACHINE_TYPE_NAME("next-cube"),
         .desc = "NeXTcube (68040)",
         .model = NEXT_MODEL_CUBE,
