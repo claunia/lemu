@@ -325,6 +325,24 @@ static void next_scsi_esp_dma_read(void *opaque, uint8_t *buf, int len)
     next_scsi_sync_esp_dma(s);
 }
 
+/*
+ * The bytes the channel can give the drive now: the NeXT driver sets up
+ * a long write one buffer at a time, from its DMA interrupt.
+ */
+static uint32_t next_scsi_esp_dma_avail(void *opaque)
+{
+    NeXTSCSIState *s = opaque;
+    NeXTDMAState *dma = s->dma;
+    NeXTDMAChan *c = next_dma_chan(dma, NEXT_DMA_SCSI);
+    uint32_t n = s->buf_size;
+
+    if (!s->floppy_select && next_dma_enabled(dma, NEXT_DMA_SCSI) &&
+        !next_dma_dev2mem(dma, NEXT_DMA_SCSI) && c->limit > c->next) {
+        n += c->limit - c->next;
+    }
+    return n;
+}
+
 void next_scsi_set_floppy(NeXTSCSIState *s, const NeXTSCSIFloppyOps *ops,
                           void *opaque)
 {
@@ -510,6 +528,7 @@ static void next_scsi_realize(DeviceState *dev, Error **errp)
 
     esp->dma_memory_read = next_scsi_esp_dma_read;
     esp->dma_memory_write = next_scsi_esp_dma_write;
+    esp->dma_read_avail = next_scsi_esp_dma_avail;
     esp->dma_opaque = s;
     esp->dma_enabled = 0;
     sysbus_esp->it_shift = 0;
