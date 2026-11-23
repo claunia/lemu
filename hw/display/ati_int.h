@@ -108,6 +108,7 @@ typedef struct ATIVGARegs {
 
 typedef struct ATIHostDataState {
     bool active;
+    uint32_t src_source;
     uint32_t row;
     uint32_t col;
     uint32_t next;

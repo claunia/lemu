@@ -490,6 +490,7 @@ void ati_2d_blt(ATIVGAState *s)
     if (src_source == DP_SRC_HOST || src_source == DP_SRC_HOST_BYTEALIGN) {
         /* Begin a HOST_DATA blit */
         s->host_data.active = true;
+        s->host_data.src_source = src_source;
         s->host_data.next = 0;
         s->host_data.col = 0;
         s->host_data.row = 0;
@@ -562,13 +563,14 @@ bool ati_host_data_flush(ATIVGAState *s)
     unsigned bypp, pix_count, row, col, idx;
     uint8_t pix_buf[ATI_HOST_DATA_ACC_BITS * sizeof(uint32_t)];
     uint8_t fg_mask[ATI_HOST_DATA_ACC_BITS];
-    uint32_t src_source = s->regs.dp_mix & DP_SRC_SOURCE;
+    /* the source of the blit that started this, not of later ones */
+    uint32_t src_source = s->host_data.src_source;
     uint32_t src_datatype = s->regs.dp_datatype & DP_SRC_DATATYPE;
 
     if (!s->host_data.active) {
         return false;
     }
-    if (src_source != DP_SRC_HOST) {
+    if (src_source != DP_SRC_HOST && src_source != DP_SRC_HOST_BYTEALIGN) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "host_data_blt: unsupported src_source %x\n", src_source);
         return false;
@@ -616,15 +618,35 @@ bool ati_host_data_flush(ATIVGAState *s)
             bswap32s(&fg);
             bswap32s(&bg);
         }
+        /*
+         * With HOST_BYTEALIGN every scanline starts on a byte: the bits
+         * left in the byte that ends a scanline are padding.
+         */
+        bool byte_align = src_source == DP_SRC_HOST_BYTEALIGN;
+        unsigned c = s->host_data.col, r = s->host_data.row;
+
         idx = 0;
+        pix_count = 0;
         for (int word = 0; word < 4; word++) {
             for (int byte = 0; byte < 4; byte++) {
                 uint8_t byte_val = s->host_data.acc[word] >> (byte * 8);
                 for (int i = 0; i < 8; i++) {
                     bool is_fg = byte_val & BIT(byte_pix_order ? i : 7 - i);
+
+                    if (r >= ctx.dst.height) {
+                        break;
+                    }
                     stn_he_p(&pix_buf[idx], bypp, is_fg ? fg : bg);
                     fg_mask[idx / bypp] = is_fg;
                     idx += bypp;
+                    pix_count++;
+                    if (++c >= ctx.dst.width) {
+                        c = 0;
+                        r++;
+                        if (byte_align) {
+                            break;
+                        }
+                    }
                 }
             }
         }
