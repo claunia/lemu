@@ -18,7 +18,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-i386 | nt31x86, nt351x86, nt40x86, aix13ps2, aix13ps2-tcf, dellunix22, dgux420x86, sinixz542 | `../pc/release/pack.sh` |
 | qemu-system-sparc | sunos414 | `../sun4m/release/mkrelease.sh` |
 | qemu-system-m68k | aux311q800 | `../q800/release/mkrelease.sh` |
-| qemu-system-m68k | ns08computer, ns09computer, ns10computer, ns10acomputer, ns20cube, ns21color, ns22computer, ns31turbo, ns32cube, ns33station, ns33turbocolor, os40cubeturbo, os42color | `../next/release/mkrelease.sh` |
+| qemu-system-m68k | ns08computer, ns09computer, ns10computer, ns10acomputer, ns20cube, ns21color, ns22computer, ns30station, ns31turbo, ns32cube, ns33station, ns33turbocolor, os40cubeturbo, os42color | `../next/release/mkrelease.sh` |
 
 Run them on an Apple Silicon Mac with Homebrew and Docker. The Linux and
 Windows builds run in Docker.

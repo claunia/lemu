@@ -39,6 +39,7 @@ seven.
 | [ns20cube](ns20cube/run.sh) | NeXTSTEP 2.0 | `next-cube` | `Rev_2.5_v66.bin` | `ns20.qcow2` | 32203 | Workspace, as me |
 | [ns21color](ns21color/run.sh) | NeXTSTEP 2.1 | `next-station-color` | `Rev_2.5_v66.bin` | `ns21.qcow2` | 32213 | Workspace, as me |
 | [ns22computer](ns22computer/run.sh) | NeXTSTEP 2.2 | `next-computer` | `Rev_1.2.bin` | `ns22.qcow2` | 32223 | Workspace, as me |
+| [ns30station](ns30station/run.sh) | NeXTSTEP 3.0 | `next-station` | `Rev_2.5_v66.bin` | `ns30.qcow2` | 32303 | first-boot setup |
 | [ns31turbo](ns31turbo/run.sh) | NeXTSTEP 3.1 | `next-station-turbo` | `Rev_3.3_v74.bin` | `ns31.qcow2` | 32313 | first-boot setup |
 | [ns32cube](ns32cube/run.sh) | NeXTSTEP 3.2 | `next-cube` | `Rev_2.5_v66.bin` | `ns32.qcow2` | 32320 | login window (root) |
 | [ns33station](ns33station/run.sh) | NeXTSTEP 3.3 | `next-station` | `Rev_2.5_v66.bin` | `ns33.qcow2` | 32323 | login window (root) |
@@ -46,8 +47,9 @@ seven.
 | [os40cubeturbo](os40cubeturbo/run.sh) | OPENSTEP 4.0 | `next-cube-turbo` | `Rev_3.3_v74.bin` | `os40.qcow2` | 32403 | Workspace, as me |
 | [os42color](os42color/run.sh) | OPENSTEP 4.2 | `next-station-color` | `Rev_2.5_v66.bin` | `os42.qcow2` | 32423 | login window (root) |
 
-- The disks are installations made with the Previous emulator. The
-  NeXTSTEP 3.0 one is empty, so there is no 3.0 kit.
+- The disks are installations made with the Previous emulator, but for
+  3.0: Previous's 3.0 disk is empty, so ns30station is a fresh install
+  from the NeXTSTEP 3.0 installer disk, made in LEMU (below).
 - 0.8 and 0.9 do not answer telnet. The others refuse root logins over
   telnet; on 2.2, me logs in, and on 3.x and 4.x, make a user first.
 
@@ -125,6 +127,10 @@ at ID 6:
     -drive file=hd.qcow2,if=none,id=hd0 -device scsi-hd,scsi-id=0,drive=hd0
     -drive file=cd.iso,if=none,id=cd0,format=raw,media=cdrom -device scsi-cd,scsi-id=6,drive=cd0
 
+- NeXTSTEP 3.0: `nextstep-3.0.iso` is not a CD but the installer's hard
+  disk, with 2048-byte sectors. Attach it as the boot disk with
+  `-device scsi-hd,scsi-id=0,drive=src,logical_block_size=2048,physical_block_size=2048`
+  and a blank disk at ID 1; install onto `sd1a`. About 10 minutes.
 - NeXTSTEP 2.2, on a 68040 machine: the CD with its 2.88 MB CDROM_Recover
   floppy (`-drive file=fd.img,format=raw,if=floppy`). `b fd`, then
   Rebuild boot device from CD-ROM. About 5 minutes.
@@ -170,11 +176,13 @@ at ID 6:
   2.5 v66), and 3.3 from the release CD, with the floppy on the
   NeXTstation and from the CD alone on the NeXTstation Turbo (ROM 3.3
   v74). Each installed disk boots to the Workspace.
-- The nine kits from ns08computer to os40cubeturbo come up as the table
-  above says, through their run.sh; telnet answers on the seven from 1.0
+- NeXTSTEP 3.0 installs from its installer disk on the NeXTstation, and
+  the installed disk boots into the first-boot setup and the Workspace.
+- The ten kits from ns08computer to os40cubeturbo come up as the table
+  above says, through their run.sh; telnet answers on the eight from 1.0
   on.
 - The q800 still boots A/UX 3.0.1, 3.1 and 3.1.1 and System 7.1 to 7.5.3
-  (the 68040 and ESP changes are shared).
+  (the 68040, interrupt and ESP changes are shared).
 
 ## Gaps
 
