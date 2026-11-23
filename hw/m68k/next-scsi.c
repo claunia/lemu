@@ -30,6 +30,10 @@
 #include "hw/dma/next-dma.h"
 #include "hw/m68k/next-scsi.h"
 #include "migration/vmstate.h"
+#include "cpu.h"
+
+#define NEXT_SCSI_ROM_BASE 0x01000000
+#define NEXT_SCSI_ROM_SIZE 0x00020000
 
 #define ESPCTRL_CLKMASK     0xc0
 #define ESPCTRL_ENABLE_INT  0x20    /* enable ESP interrupt */
@@ -72,6 +76,26 @@ static void next_scsi_irq_timer(void *opaque)
 }
 
 /*
+ * The ROM waits for the selection timeout with an instruction loop made
+ * for a 25 MHz 68040, which TCG runs through long before 250 ms: it then
+ * prints "sc: Didn't complete" for each empty target, again and again, and
+ * cannot boot from any disk past one. It gets its timeout sooner.
+ */
+#define NEXT_SCSI_ROM_SEL_TIMEOUT_NS (10 * SCALE_MS)
+
+static bool next_scsi_cpu_in_rom(void)
+{
+    uint32_t pc;
+
+    if (!current_cpu) {
+        return false;
+    }
+    pc = cpu_env(current_cpu)->pc;
+    /* the ROM, or its copy at 0 that the 68030 ROMs run from */
+    return (pc & 0xff000000) == NEXT_SCSI_ROM_BASE || pc < NEXT_SCSI_ROM_SIZE;
+}
+
+/*
  * How long the chip takes to raise its interrupt. When no target answers
  * a selection, the chip waits out the timeout the driver set: the select
  * timeout register times 8192 times the clock conversion factor, in
@@ -89,6 +113,9 @@ static int64_t next_scsi_irq_delay(NeXTSCSIState *s)
         int64_t sto = esp->wregs[ESP_WSEL] ? esp->wregs[ESP_WSEL] : 256;
         int64_t ccf = esp->wregs[ESP_WCCF] & 7 ? esp->wregs[ESP_WCCF] & 7 : 8;
 
+        if (next_scsi_cpu_in_rom()) {
+            return NEXT_SCSI_ROM_SEL_TIMEOUT_NS;
+        }
         return sto * 8192 * ccf * 50;   /* 50 ns a clock at 20 MHz */
     }
     return NEXT_SCSI_IRQ_DELAY_NS;
