@@ -49,6 +49,7 @@
 #include "hw/block/next-mo.h"
 #include "hw/block/next-fdc.h"
 #include "hw/audio/next-dsp.h"
+#include "hw/audio/next-sound.h"
 #include "hw/char/next-printer.h"
 #include "hw/rtc/next-rtc.h"
 #include "net/net.h"
@@ -973,6 +974,7 @@ struct NeXTState {
     NeXTMOState mo;
     NeXTFDCState fdc;
     NeXTDSPState dsp;
+    NeXTSoundState sound;
     NeXTPrinterState printer;
     ESCCState escc;
     NeXTPC pc;
@@ -1366,6 +1368,18 @@ static void next_machine_init(MachineState *machine)
     }
     next_kms_set_power_key(&m->kms, next_power_key, &m->rtc);
 
+    /* Sound, in the monitor at the other end of the KMS link */
+    object_initialize_child(OBJECT(m), "sound", &m->sound, TYPE_NEXT_SOUND);
+    object_property_set_link(OBJECT(&m->sound), "dma", OBJECT(&m->dma),
+                             &error_abort);
+    object_property_set_link(OBJECT(&m->sound), "kms", OBJECT(&m->kms),
+                             &error_abort);
+    if (MACHINE(m)->audiodev) {
+        qdev_prop_set_string(DEVICE(&m->sound), "audiodev",
+                             MACHINE(m)->audiodev);
+    }
+    sysbus_realize(SYS_BUS_DEVICE(&m->sound), &error_fatal);
+
     /* RAM */
     next_map_ram(m, nc, sysmem);
     if (!nc->color && !nc->turbo) {
@@ -1489,6 +1503,7 @@ static void next_machine_class_init(ObjectClass *oc, const void *data)
     mc->init = next_machine_init;
     mc->block_default_type = IF_SCSI;
     mc->default_ram_id = "next.ram";
+    machine_add_audiodev_property(mc);
 
     object_class_property_add_bool(oc, "new-rtc", next_get_new_rtc,
                                    next_set_new_rtc);
