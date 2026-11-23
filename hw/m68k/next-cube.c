@@ -261,6 +261,9 @@ static const MemoryRegionOps next_int_ops = {
     .endianness = DEVICE_BIG_ENDIAN,
 };
 
+/* The guest asked for a reset through the BMAP: keep the CPU registers */
+static bool next_warm_reset;
+
 /* SCR1: 0x0200c000, also 0x0200c800 */
 static uint64_t next_scr1_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -655,6 +658,7 @@ static MemTxResult next_bmap_write(void *opaque, hwaddr addr, uint64_t data,
     }
     s->bmap[reg] = val;
     if (reg == BMAP_DDIR && (val & BMAP_RESET)) {
+        next_warm_reset = true;
         qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
     }
     return MEMTX_OK;
@@ -1143,8 +1147,21 @@ static void next_cpu_reset(void *opaque)
 {
     M68kCPU *cpu = opaque;
     CPUState *cs = CPU(cpu);
+    uint32_t dregs[8], aregs[7];
 
+    /*
+     * A reset through the BMAP leaves the data and address registers as
+     * they were, as on the real CPU: the 2.2 ROMs (v63 and older) set D1
+     * to a magic value, reset, and go on when they find it after.
+     */
+    memcpy(dregs, cpu->env.dregs, sizeof(dregs));
+    memcpy(aregs, cpu->env.aregs, sizeof(aregs));
     cpu_reset(cs);
+    if (next_warm_reset) {
+        memcpy(cpu->env.dregs, dregs, sizeof(dregs));
+        memcpy(cpu->env.aregs, aregs, sizeof(aregs));
+        next_warm_reset = false;
+    }
     /* the ROM is at 0: stack pointer and start address */
     cpu->env.aregs[7] = ldl_phys(cs->as, 0);
     cpu->env.pc = ldl_phys(cs->as, 4);
