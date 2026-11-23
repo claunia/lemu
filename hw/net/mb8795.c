@@ -337,7 +337,9 @@ static void mb8795_send(MB8795State *s, int wire)
         if (wire == EN_THINWIRE && !s->rx_size) {
             mb8795_take_packet(s, s->tx_buf, s->tx_size);
         }
+        s->sending = true;
         qemu_send_packet(qemu_get_queue(s->nic), s->tx_buf, s->tx_size);
+        s->sending = false;
     }
 }
 
@@ -526,6 +528,10 @@ static void mb8795_tick(void *opaque)
     }
     s->in_tick = true;
     s->wire = mb8795_wire(s);
+    /* packets that came while the receiver was busy, or while sending */
+    if (s->recv_state == RECV_STATE_WAITING && !s->rx_size) {
+        qemu_flush_queued_packets(qemu_get_queue(s->nic));
+    }
     mb8795_receive_step(s);
     mb8795_send_step(s);
     /* a looped back packet goes into memory at once */
@@ -533,11 +539,6 @@ static void mb8795_tick(void *opaque)
         mb8795_receive_step(s);
     }
     s->in_tick = false;
-
-    /* packets that came while the receiver was busy */
-    if (s->recv_state == RECV_STATE_WAITING && !s->rx_size) {
-        qemu_flush_queued_packets(qemu_get_queue(s->nic));
-    }
 
     timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
               (s->recv_state == RECV_STATE_WAITING ? ENET_IO_DELAY
@@ -573,7 +574,12 @@ static bool mb8795_can_receive(NetClientState *nc)
     MB8795State *s = qemu_get_nic_opaque(nc);
     int wire = mb8795_wire(s);
 
-    return !(s->reset & EN_RESET) && s->rx_size == 0 &&
+    /*
+     * Not while sending: an answer that comes back at once waits for the
+     * next tick, when the driver has set up the receive DMA again (the
+     * Turbo controller turns its receiver off on an overflow).
+     */
+    return !(s->reset & EN_RESET) && !s->sending && s->rx_size == 0 &&
            s->recv_state == RECV_STATE_WAITING &&
            (wire == EN_THINWIRE || wire == EN_TWISTEDPAIR);
 }
