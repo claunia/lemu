@@ -2,6 +2,7 @@
  * QEMU ATI SVGA emulation
  *
  * Copyright (c) 2019 BALATON Zoltan
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  */
@@ -113,6 +114,46 @@ typedef struct ATIHostDataState {
     uint32_t acc[4];
 } ATIHostDataState;
 
+typedef struct ATICPParser {
+    uint32_t hdr;
+    uint32_t left;      /* dwords of the current packet still to come */
+    uint32_t pos;
+    uint32_t reg;
+    uint32_t *buf;      /* body of a type 3 packet */
+} ATICPParser;
+
+typedef struct ATICPState {
+    uint32_t mc_fb_location;
+    bool mc_fb_location_set;
+    uint32_t mc_agp_location;
+    uint32_t agp_base;
+    uint32_t aic_cntl;
+    uint32_t aic_pt_base;
+    uint32_t aic_lo_addr;
+    uint32_t aic_hi_addr;
+    uint32_t rb_base;
+    uint32_t rb_cntl;
+    uint32_t rb_rptr_addr;
+    uint32_t rb_rptr;
+    uint32_t rb_wptr;
+    uint32_t ib_base;
+    uint32_t ib_bufsz;
+    uint32_t csq_cntl;
+    uint32_t csq_mode;
+    uint32_t scratch[8];
+    uint32_t scratch_umsk;
+    uint32_t scratch_addr;
+    uint32_t me_cntl;
+    uint32_t me_ram_addr;
+    uint32_t me_ram_raddr;
+    uint32_t me_ram[512];
+    uint32_t soft_reset;
+    int depth;
+    bool running;
+    ATICPParser ring;
+    ATICPParser ib;
+} ATICPState;
+
 struct ATIVGAState {
     PCIDevice dev;
     VGACommonState vga;
@@ -134,9 +175,25 @@ struct ATIVGAState {
     MemoryRegion mm;
     ATIVGARegs regs;
     ATIHostDataState host_data;
+    ATICPState cp;
+    uint32_t *mmregs;   /* registers that are only stored */
 };
 
 const char *ati_reg_name(int num);
+void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size);
+
+uint32_t ati_fb_offset(ATIVGAState *s, uint32_t gpu_addr);
+bool ati_gpu_vram_offset(ATIVGAState *s, uint32_t gpu_addr, uint32_t *off);
+void ati_3d_packet(ATIVGAState *s, uint8_t op, const uint32_t *d, uint32_t n);
+bool ati_gpu_rw(ATIVGAState *s, uint32_t addr, void *buf, uint32_t len,
+                bool write);
+bool ati_cp_mm_read(ATIVGAState *s, hwaddr addr, unsigned size,
+                    uint32_t *val);
+bool ati_cp_mm_write(ATIVGAState *s, hwaddr addr, uint32_t data,
+                     unsigned size);
+void ati_cp_reset(ATIVGAState *s);
+void ati_cp_init(ATIVGAState *s);
+void ati_cp_exit(ATIVGAState *s);
 
 void ati_2d_blt(ATIVGAState *s);
 void ati_2d_line(ATIVGAState *s, uint32_t end);

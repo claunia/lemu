@@ -2,6 +2,7 @@
  * QEMU ATI SVGA emulation
  *
  * Copyright (c) 2019 BALATON Zoltan
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  */
@@ -683,6 +684,11 @@ static uint64_t ati_mm_read(void *opaque, hwaddr addr, unsigned int size)
                       "Read from write-only register 0x%x\n", (unsigned)addr);
         break;
     default:
+        if (!ati_cp_mm_read(s, addr, size, &val) &&
+            addr < memory_region_size(&s->mm)) {
+            /* registers we do not model read back what was written */
+            val = ati_reg_read_offs(s->mmregs[addr / 4], addr & 3, size);
+        }
         break;
     }
     if (addr < CUR_OFFSET || addr > CUR_CLR1 || ATI_DEBUG_HW_CURSOR) {
@@ -718,8 +724,7 @@ static void ati_update_default_pitch_offset(ATIVGAState *s)
     }
 }
 
-static void ati_mm_write(void *opaque, hwaddr addr,
-                           uint64_t data, unsigned int size)
+void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
 {
     ATIVGAState *s = opaque;
 
@@ -764,11 +769,20 @@ static void ati_mm_write(void *opaque, hwaddr addr,
         }
         break;
     case GEN_INT_STATUS:
+    {
+        bool fire = s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
+                    (data & RADEON_SW_INT_FIRE);
+
         data &= (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF ?
-                 0x000f040fUL : 0xfc080effUL);
+                 0x000f040fUL : 0xfc080effUL & ~RADEON_SW_INT_FIRE);
         s->regs.gen_int_status &= ~data;
+        if (fire) {
+            /* the CP writes this to raise an interrupt (fences) */
+            s->regs.gen_int_status |= RADEON_SW_INT_TEST;
+        }
         ati_vga_update_irq(s);
         break;
+    }
     case CRTC_GEN_CNTL ... CRTC_GEN_CNTL + 3:
     {
         uint32_t val = s->regs.crtc_gen_cntl;
@@ -797,8 +811,9 @@ static void ati_mm_write(void *opaque, hwaddr addr,
                                        (s->regs.crtc_gen_cntl & CRTC2_CUR_EN) != 0);
             }
         }
-        if ((val & (CRTC2_EXT_DISP_EN | CRTC2_EN)) !=
-            (s->regs.crtc_gen_cntl & (CRTC2_EXT_DISP_EN | CRTC2_EN))) {
+        if ((val ^ s->regs.crtc_gen_cntl) &
+            (CRTC2_EXT_DISP_EN | CRTC2_EN | CRTC_PIX_WIDTH_MASK)) {
+            /* MorphOS changes the depth while the CRTC stays on */
             ati_vga_switch_mode(s);
         }
         break;
@@ -900,13 +915,23 @@ static void ati_mm_write(void *opaque, hwaddr addr,
         }
         break;
     case CRTC_H_TOTAL_DISP:
-        s->regs.crtc_h_total_disp = data & 0x07ff07ff;
+        if (s->regs.crtc_h_total_disp != (data & 0x07ff07ff)) {
+            s->regs.crtc_h_total_disp = data & 0x07ff07ff;
+            if (s->mode == EXT_MODE) {
+                ati_vga_switch_mode(s);
+            }
+        }
         break;
     case CRTC_H_SYNC_STRT_WID:
         s->regs.crtc_h_sync_strt_wid = data & 0x17bf1fff;
         break;
     case CRTC_V_TOTAL_DISP:
-        s->regs.crtc_v_total_disp = data & 0x0fff0fff;
+        if (s->regs.crtc_v_total_disp != (data & 0x0fff0fff)) {
+            s->regs.crtc_v_total_disp = data & 0x0fff0fff;
+            if (s->mode == EXT_MODE) {
+                ati_vga_switch_mode(s);
+            }
+        }
         break;
     case CRTC_V_SYNC_STRT_WID:
         s->regs.crtc_v_sync_strt_wid = data & 0x9f0fff;
@@ -1242,6 +1267,10 @@ static void ati_mm_write(void *opaque, hwaddr addr,
         }
         break;
     default:
+        if (!ati_cp_mm_write(s, addr, data, size) &&
+            addr < memory_region_size(&s->mm)) {
+            ati_reg_write_offs(&s->mmregs[addr / 4], addr & 3, data, size);
+        }
         break;
     }
 }
@@ -1364,6 +1393,8 @@ static void ati_vga_realize(PCIDevice *dev, Error **errp)
     memory_region_init_io(&s->mm, OBJECT(s), &ati_mm_ops, s, "ati.mmregs",
                           s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF ?
                           ATI_RAGE128_MMIO_SIZE : ATI_R100_MMIO_SIZE);
+    s->mmregs = g_new0(uint32_t, memory_region_size(&s->mm) / 4);
+    ati_cp_init(s);
     /* io space is alias to beginning of mmregs */
     memory_region_init_alias(&s->io, OBJECT(s), "ati.io", &s->mm, 0, 0x100);
 
@@ -1418,6 +1449,7 @@ static void ati_vga_reset(DeviceState *dev)
     s->regs.rbbm_guicntl = 0;
     s->regs.config_cntl = 0;
     s->regs.surface_cntl = 0;
+    ati_cp_reset(s);
 }
 
 static void ati_vga_exit(PCIDevice *dev)
@@ -1426,6 +1458,8 @@ static void ati_vga_exit(PCIDevice *dev)
 
     timer_del(&s->vblank_timer);
     qemu_graphic_console_close(s->vga.con);
+    ati_cp_exit(s);
+    g_free(s->mmregs);
 }
 
 static const Property ati_vga_properties[] = {

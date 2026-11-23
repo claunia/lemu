@@ -3,6 +3,7 @@
  * 2D engine functions
  *
  * Copyright (c) 2019 BALATON Zoltan
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  */
@@ -14,6 +15,7 @@
 #include "ui/pixel_ops.h"
 #include "ui/console.h"
 #include "ui/rect.h"
+#include "trace.h"
 
 /*
  * NOTE:
@@ -117,7 +119,7 @@ static void setup_2d_blt_ctx(ATIVGAState *s, ATI2DCtx *ctx)
     ctx->brush[1] = s->regs.brush_data[1];
     ctx->lsb_first = s->regs.dp_datatype & DP_BYTE_PIX_ORDER;
     ctx->write_mask = s->regs.dp_write_mask;
-    ctx->dst_offset = s->regs.dst_offset;
+    ctx->dst_offset = ati_fb_offset(s, s->regs.dst_offset);
 
     ctx->scissor.width = s->regs.sc_right - s->regs.sc_left + 1;
     ctx->scissor.height = s->regs.sc_bottom - s->regs.sc_top + 1;
@@ -131,7 +133,7 @@ static void setup_2d_blt_ctx(ATIVGAState *s, ATI2DCtx *ctx)
     ctx->dst.y = (ctx->top_to_bottom ?
                  s->regs.dst_y : s->regs.dst_y + 1 - ctx->dst.height);
     ctx->dst_stride = s->regs.dst_pitch;
-    ctx->dst_bits = s->vga.vram_ptr + s->regs.dst_offset;
+    ctx->dst_bits = s->vga.vram_ptr + ctx->dst_offset;
     if (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF) {
         ctx->dst_stride *= ctx->bpp;
     }
@@ -141,7 +143,7 @@ static void setup_2d_blt_ctx(ATIVGAState *s, ATI2DCtx *ctx)
     ctx->src.y = (ctx->top_to_bottom ?
                  s->regs.src_y : s->regs.src_y + 1 - ctx->dst.height);
     ctx->src_stride = s->regs.src_pitch;
-    ctx->src_bits = s->vga.vram_ptr + s->regs.src_offset;
+    ctx->src_bits = s->vga.vram_ptr + ati_fb_offset(s, s->regs.src_offset);
     ctx->src_mask = NULL;
     if (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF) {
         ctx->src_stride *= ctx->bpp;
@@ -295,7 +297,11 @@ static bool ati_2d_do_blt(const ATI2DCtx *ctx, uint8_t use_pixman)
     if (ctx->dst.x > 0x3fff || ctx->dst.y > 0x3fff ||
         ctx->dst_bits >= vram_end - bypp || ctx->dst_bits + ctx->dst.x * bypp +
         (ctx->dst.y + ctx->dst.height) * ctx->dst_stride >= vram_end - bypp) {
-        qemu_log_mask(LOG_UNIMP, "blt outside vram not implemented\n");
+        qemu_log_mask(LOG_UNIMP, "blt outside vram not implemented: dst "
+                      "offset 0x%x (%d,%d) %dx%d pitch %d\n",
+                      (unsigned)(ctx->dst_bits - ctx->vga->vram_ptr),
+                      ctx->dst.x, ctx->dst.y, ctx->dst.width,
+                      ctx->dst.height, ctx->dst_stride);
         return false;
     }
     qemu_rect_intersect(&ctx->dst, &ctx->scissor, &vis_dst);
@@ -331,7 +337,10 @@ static bool ati_2d_do_blt(const ATI2DCtx *ctx, uint8_t use_pixman)
             ctx->src_bits >= vram_end - bypp ||
             ctx->src_bits + vis_src.x * bypp + (vis_src.y + vis_dst.height) *
             ctx->src_stride >= vram_end - bypp)) {
-            qemu_log_mask(LOG_UNIMP, "blt outside vram not implemented\n");
+            qemu_log_mask(LOG_UNIMP, "blt outside vram not implemented: src "
+                          "offset 0x%x (%d,%d) pitch %d\n",
+                          (unsigned)(ctx->src_bits - ctx->vga->vram_ptr),
+                          vis_src.x, vis_src.y, ctx->src_stride);
             return false;
         }
     }
@@ -487,6 +496,9 @@ void ati_2d_blt(ATIVGAState *s)
         return;
     }
     setup_2d_blt_ctx(s, &ctx);
+    trace_ati_2d_blt(ctx.rop3 >> 16, ctx.bpp, ctx.dst_offset, ctx.dst.x,
+                     ctx.dst.y, ctx.dst.width, ctx.dst.height,
+                     ctx.scissor.width, ctx.scissor.height);
     if (ati_2d_do_blt(&ctx, s->use_pixman)) {
         ati_set_dirty(&ctx);
     }

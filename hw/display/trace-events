@@ -148,6 +148,17 @@ sii9022_switch_mode(const char *mode) "mode: %s"
 ati_mm_read(unsigned int size, uint64_t addr, const char *name, uint64_t val) "%u 0x%"PRIx64 " %s -> 0x%"PRIx64
 ati_mm_write(unsigned int size, uint64_t addr, const char *name, uint64_t val) "%u 0x%"PRIx64 " %s <- 0x%"PRIx64
 
+# ati_2d.c
+ati_2d_blt(uint32_t rop, int bpp, uint32_t offset, int x, int y, int w, int h, int cw, int ch) "rop 0x%02x bpp %d dst 0x%x (%d,%d) %dx%d clip %dx%d"
+
+# ati_3d.c
+ati_3d_draw(int prim, int count, uint32_t fmt, bool tex) "prim %d vertices %d format 0x%x texture %d"
+
+# ati_cp.c
+ati_cp_ring(uint32_t rptr, uint32_t wptr) "rptr %u wptr %u"
+ati_cp_ib(uint32_t base, uint32_t size) "base 0x%08x size %u"
+ati_cp_packet3(uint32_t op, uint32_t count) "op 0x%02x count %u"
+
 # artist.c
 artist_reg_read(unsigned int size, uint64_t addr, const char *name, uint64_t val) "%u 0x%"PRIx64 "%s -> 0x%08"PRIx64
 artist_reg_write(unsigned int size, uint64_t addr, const char *name, uint64_t val) "%u 0x%"PRIx64 "%s <- 0x%08"PRIx64
