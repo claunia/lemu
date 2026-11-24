@@ -3,6 +3,7 @@
  * QEMU PowerPC CHRP (Genesi/bPlan Pegasos II) hardware System Emulator
  *
  * Copyright (c) 2018-2020 BALATON Zoltan
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This work is licensed under the GNU GPL license version 2 or later.
  *
@@ -339,8 +340,16 @@ static void set_mem_windows(MV64361State *s, uint32_t val)
                 }
             /* 19 is integrated SRAM */
             } else if (i == 20) {
+                /*
+                 * The registers are the device's own region, not an alias
+                 * made for the window: only take it out of the address
+                 * space. Unparenting it would free it, and the window
+                 * would never come back, as after a reset.
+                 */
                 mr = &s->regs;
-                unmap_region(mr);
+                if (memory_region_is_mapped(mr)) {
+                    memory_region_del_subregion(get_system_memory(), mr);
+                }
                 if (!(val & mask)) {
                     memory_region_add_subregion(get_system_memory(),
                         (s->regs_base & 0xfffff) << 16, mr);
