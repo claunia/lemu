@@ -265,8 +265,13 @@ static void pegasos_init(MachineState *machine)
     spd_data = spd_data_generate(DDR, machine->ram_size);
     smbus_eeprom_init_one(i2c_bus, 0x57, spd_data);
 
-    /* other PC hardware */
-    pci_vga_init(pci_bus);
+    /*
+     * The graphics card. On Pegasos II it goes in the AGP slot, which is on
+     * the 66 MHz PCI unit 0 of the MV64361 (/pci@c0000000): the chip has no
+     * AGP port or GART of its own, so the slot runs the card as a PCI one.
+     */
+    pci_vga_init(pm->type == PEGASOS2 ? mv64361_get_pci_bus(pm->nb, 0)
+                                      : pci_bus);
 
     if (pm->type == PEGASOS2) {
         /* on board VIA VT6102 Rhine-II Ethernet */
@@ -796,6 +801,11 @@ static void pegasos2_init(Object *obj)
     pm->bus_freq_hz = 133333333;
 }
 
+/* the Radeons of the Pegasos II are AGP cards */
+static GlobalProperty pegasos2_compat[] = {
+    { "ati-vga", "agp", "on" },
+};
+
 static void pegasos2_machine_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -803,6 +813,8 @@ static void pegasos2_machine_class_init(ObjectClass *oc, const void *data)
     mc->desc = "Genesi/bPlan Pegasos II";
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("7457_v1.2");
     mc->default_nic = "via-rhine";
+    compat_props_add(mc->compat_props, pegasos2_compat,
+                     G_N_ELEMENTS(pegasos2_compat));
 }
 
 DEFINE_MACHINE_EXTENDED("pegasos", MACHINE, PegasosMachineState,
