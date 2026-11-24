@@ -356,6 +356,29 @@ static void test_surface_swap(void)
     stop(&t);
 }
 
+/*
+ * A texel written while SURFACE_CNTL swaps 32 bit words outside the
+ * surfaces: the engine still sees it little endian after the swap is off.
+ */
+static void test_nonsurf_swap(void)
+{
+    static const uint8_t be_red[4] = { 0xff, 0xff, 0x00, 0x00 };
+    uint8_t raw[4];
+    Ctx t;
+
+    start(&t);
+    clear(&t, DEPTH_16);
+    reg(&t, SURFACE_CNTL, 1 << 21);      /* aperture 0 swaps 32 bit words */
+    qpci_memwrite(t.dev, t.fb, TEX, be_red, 4);
+    reg(&t, SURFACE_CNTL, 0);
+    qpci_memread(t.dev, t.fb, TEX, raw, 4);
+    g_assert_cmphex((uint32_t)ldl_le_p(raw), ==, RED);
+    tex_state(&t, 0);
+    tex_rect(&t, 0, 0, 4);
+    g_assert_cmphex(pixel(&t, 2, 2), ==, RED);
+    stop(&t);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -368,5 +391,6 @@ int main(int argc, char **argv)
     qtest_add_func("/ati-3d/indexed", test_indexed);
     qtest_add_func("/ati-3d/mipmap", test_mipmap);
     qtest_add_func("/ati-3d/surface-swap", test_surface_swap);
+    qtest_add_func("/ati-3d/nonsurf-swap", test_nonsurf_swap);
     return g_test_run();
 }
