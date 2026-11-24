@@ -1446,6 +1446,29 @@ static void ati_vga_realize(PCIDevice *dev, Error **errp)
     pci_register_bar(dev, 1, PCI_BASE_ADDRESS_SPACE_IO, &s->io);
     pci_register_bar(dev, 2, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->mm);
 
+    /*
+     * The AGP capability of an AGP card: version 2.0, 1x, 2x and 4x, side
+     * band addressing, a request queue of 48. There is no AGP transfer
+     * mode behind it: the card still does PCI cycles, as it does in a slot
+     * where the host has no GART.
+     */
+    if (s->agp) {
+        int cap = pci_add_capability(dev, PCI_CAP_ID_AGP, 0x58,
+                                     PCI_AGP_SIZEOF, errp);
+        if (cap < 0) {
+            return;
+        }
+        pci_set_byte(dev->config + cap + PCI_AGP_VERSION, 0x20);
+        pci_set_long(dev->config + cap + PCI_AGP_STATUS,
+                     (47u << 24) | PCI_AGP_STATUS_SBA | PCI_AGP_STATUS_RATE4 |
+                     PCI_AGP_STATUS_RATE2 | PCI_AGP_STATUS_RATE1);
+        pci_set_long(dev->wmask + cap + PCI_AGP_COMMAND,
+                     PCI_AGP_COMMAND_RQ_MASK | PCI_AGP_COMMAND_SBA |
+                     PCI_AGP_COMMAND_AGP | PCI_AGP_COMMAND_64BIT |
+                     PCI_AGP_COMMAND_FW | PCI_AGP_COMMAND_RATE4 |
+                     PCI_AGP_COMMAND_RATE2 | PCI_AGP_COMMAND_RATE1);
+    }
+
     /* most interrupts are not yet emulated but MacOS needs at least VBlank */
     dev->config[PCI_INTERRUPT_PIN] = 1;
     timer_init_ns(&s->vblank_timer, QEMU_CLOCK_VIRTUAL, ati_vga_vblank_irq, s);
@@ -1492,6 +1515,7 @@ static const Property ati_vga_properties[] = {
     DEFINE_PROP_UINT16("x-device-id", ATIVGAState, dev_id,
                        PCI_DEVICE_ID_ATI_RAGE128_PF),
     DEFINE_PROP_BOOL("guest_hwcursor", ATIVGAState, cursor_guest_mode, false),
+    DEFINE_PROP_BOOL("agp", ATIVGAState, agp, false),
     /* this is a debug option, prefer PROP_UINT over PROP_BIT for simplicity */
     DEFINE_PROP_UINT8("x-pixman", ATIVGAState, use_pixman, DEFAULT_X_PIXMAN),
     DEFINE_PROP_UINT64("x-linear-aper-size", ATIVGAState, linear_aper_sz, 0),
