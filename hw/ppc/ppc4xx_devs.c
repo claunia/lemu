@@ -75,6 +75,7 @@ static void ppc4xx_mal_reset(DeviceState *dev)
 #define MAL_LAST            0x1000
 #define MAL_RX_FIRST        0x0800
 #define MAL_INTR            0x0400
+#define MAL_CFG_EOPIE       0x00000004  /* EOB at the end of every packet */
 #define MAL_EMAC_BITS       0x03ff  /* EMAC control in, status out */
 #define MAL_IER_DE          0x00000010
 #define MAL_MAX_FRAME       16384
@@ -182,7 +183,8 @@ void ppc4xx_mal_transmit(Ppc4xxMalState *mal, int chan,
         }
         /* sent, and no errors in the EMAC status bits */
         mal_desc_write(desc, ctrl & ~(MAL_TX_READY | MAL_EMAC_BITS), dlen);
-        if (ctrl & MAL_INTR) {
+        if ((ctrl & MAL_INTR) ||
+            ((mal->cfg & MAL_CFG_EOPIE) && (ctrl & MAL_LAST))) {
             mal->txeobisr |= mal_chan_bit(chan);
         }
         mal->txcur[chan] = mal_next(desc, ctrl, mal->txctpr[chan]);
@@ -235,7 +237,8 @@ bool ppc4xx_mal_receive(Ppc4xxMalState *mal, int chan, const uint8_t *data,
             ctrl |= MAL_LAST;
         }
         mal_desc_write(desc, ctrl, chunk);
-        if (ctrl & MAL_INTR) {
+        if ((ctrl & MAL_INTR) ||
+            ((mal->cfg & MAL_CFG_EOPIE) && (ctrl & MAL_LAST))) {
             mal->rxeobisr |= mal_rx_bit(mal, chan);
         }
         mal->rxcur[chan] = mal_next(desc, ctrl, mal->rxctpr[chan]);
