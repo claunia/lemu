@@ -14,6 +14,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-ppc | aix325rs6000 | `../7006/release/mkrelease.sh` |
 | qemu-system-ppc | aos40amigaone | `../amigaone/release/mkrelease.sh` |
 | qemu-system-ppc | aos41sam440ep | `../sam440ep/release/mkrelease.sh` |
+| qemu-system-ppc | morphos321pegasos2 | `../pegasos2/release/mkrelease.sh` |
 | qemu-system-ppc64 | aix53pseries, aix61pseries, aix71pseries, aix72pseries | `../pseries/release/mkrelease.sh` |
 | qemu-system-alpha | nt31axp, nt351axp, nt40axp, vms15axp | `../jensen/release/pack.sh` |
 | qemu-system-mips64el | nt31mips, nt351-jazz, nt351-rm200, nt4-jazz, nt4-rm200, nt4-rm200-smp, nt4srv-rm300-smp4 | `../rm200/release/pack.sh` |
@@ -97,6 +98,7 @@ these folders in place of their own build, for example:
     sh ../7006/release/mkrelease.sh VMDIR STAGE/ppc aix325rs6000-lemu.tar.lz
     sh ../amigaone/release/mkrelease.sh aos40 VMDIR STAGE/ppc aos40amigaone-lemu.tar.lz
     sh ../sam440ep/release/mkrelease.sh aos41 VMDIR STAGE/ppc aos41sam440ep-lemu.tar.lz
+    sh ../pegasos2/release/mkrelease.sh morphos VMDIR STAGE/ppc morphos321pegasos2-lemu.tar.lz
     sh ../pseries/release/mkrelease.sh aix53 VMDIR STAGE/ppc64 aix53pseries-lemu.tar.lz
     sh ../jensen/release/pack.sh nt40 SRCDIR STAGE/alpha nt40axp-lemu.tar.lz
     sh ../pc/release/pack.sh nt351 VMDIR STAGE/i386 nt351x86-lemu.tar.lz
