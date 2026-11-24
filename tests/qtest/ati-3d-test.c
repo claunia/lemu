@@ -1,5 +1,6 @@
 /*
- * QTest testcase for the 3D engine of the ATI Radeon (R100) emulation
+ * QTest testcase for the 3D engine of the ATI Radeon (R100 and R200)
+ * emulation
  *
  * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
@@ -119,9 +120,10 @@ static uint32_t pixel(Ctx *t, int x, int y)
     return qpci_io_readl(t->dev, t->fb, CB + (y * W + x) * 4);
 }
 
-static void start(Ctx *t)
+static void start_model(Ctx *t, const char *model)
 {
-    t->qts = qtest_init("-vga none -device ati-vga,model=rv100,addr=04.0");
+    t->qts = qtest_initf("-vga none -device ati-vga,model=%s,addr=04.0",
+                         model);
     t->bus = qpci_new_pc(t->qts, NULL);
     t->dev = qpci_device_find(t->bus, QPCI_DEVFN(4, 0));
     g_assert(t->dev);
@@ -142,6 +144,11 @@ static void start(Ctx *t)
     reg(t, SE_CNTL, SE_SOLID);
     reg(t, PP_CNTL, 0);
     reg(t, PP_MISC, 0);
+}
+
+static void start(Ctx *t)
+{
+    start_model(t, "rv100");
 }
 
 static void stop(Ctx *t)
@@ -379,6 +386,167 @@ static void test_color_order(void)
     stop(&t);
 }
 
+/* R200 transform and lighting */
+#define R200_SE_VAP_CNTL            0x2080
+#define R200_SE_VTX_FMT_0           0x2088
+#define R200_SE_VTX_FMT_1           0x208c
+#define R200_SE_TCL_OUTPUT_FMT_0    0x2090
+#define R200_SE_VPORT_XSCALE        0x2098
+#define R200_SE_VTE_CNTL            0x20b0
+#define R200_SE_VAP_CNTL_STATUS     0x2140
+#define R200_TCL_VECTOR_INDX        0x2200
+#define R200_TCL_VECTOR_DATA        0x2204
+#define R200_TCL_MATRIX_SEL_0       0x2230
+#define R200_TCL_LIGHT_MODEL_CTL_0  0x2268
+#define R200_TCL_LIGHT_MODEL_CTL_1  0x226c
+#define R200_TCL_PER_LIGHT_CTL_0    0x2270
+#define R200_PP_TXCBLEND_0          0x2f00
+#define R200_PP_TXCBLEND2_0         0x2f04
+#define R200_PP_TXABLEND_0          0x2f08
+#define R200_PP_TXABLEND2_0         0x2f0c
+
+#define R200_VTX_Z0                 (1 << 0)
+#define R200_VTX_W0                 (1 << 1)
+#define R200_VTX_N0                 (1 << 6)
+#define R200_VTX_FP_RGBA0           (3 << 11)
+
+/* loads n vectors of four floats at vector address addr */
+static void tcl_vectors(Ctx *t, int addr, const float *v, int n)
+{
+    int i;
+
+    reg(t, R200_TCL_VECTOR_INDX, addr | 1 << 16);
+    for (i = 0; i < n * 4; i++) {
+        reg(t, R200_TCL_VECTOR_DATA, f2u(v[i]));
+    }
+}
+
+/*
+ * The TCL on with identity matrices (matrix 0 the modelview, matrix 1
+ * the projection), a 64 x 64 viewport, the colour out of combiner stage
+ * 0 straight from the diffuse colour.
+ */
+static void tcl_start(Ctx *t)
+{
+    static const float ident[16] = {
+        1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
+    };
+    static const float vport[6] = { 32, 32, 32, 32, 0.5f, 0.5f };
+    static uint32_t black[W * W];
+    int i;
+
+    start_model(t, "rv250");
+    /* black, written directly: the R200 reads vertices differently */
+    for (i = 0; i < W * W; i++) {
+        black[i] = cpu_to_le32(BLACK);
+    }
+    qpci_memwrite(t->dev, t->fb, CB, black, sizeof(black));
+    reg(t, RB3D_CNTL, RB_COLOR_ARGB8888);
+    reg(t, PP_CNTL, 1 << 12);
+    reg(t, R200_PP_TXCBLEND_0, 4 << 10);         /* 0 * 0 + diffuse */
+    reg(t, R200_PP_TXCBLEND2_0, 1 << 16);        /* to R0 */
+    reg(t, R200_PP_TXABLEND_0, 4 << 10);
+    reg(t, R200_PP_TXABLEND2_0, 1 << 16);
+    reg(t, R200_SE_VAP_CNTL, 1);                 /* TCL on */
+    reg(t, R200_SE_VAP_CNTL_STATUS, 0);          /* little endian arrays */
+    reg(t, R200_SE_TCL_OUTPUT_FMT_0, R200_VTX_Z0 | R200_VTX_W0 |
+        R200_VTX_FP_RGBA0);
+    reg(t, R200_SE_VTE_CNTL, 0x3f);              /* the viewport */
+    for (i = 0; i < 6; i++) {
+        reg(t, R200_SE_VPORT_XSCALE + i * 4, f2u(vport[i]));
+    }
+    reg(t, R200_TCL_MATRIX_SEL_0, 0);            /* modelview */
+    reg(t, R200_TCL_MATRIX_SEL_0 + 4, 0);        /* for the normals */
+    reg(t, R200_TCL_MATRIX_SEL_0 + 8, 1);        /* model to clip space */
+    tcl_vectors(t, 0x80, ident, 4);
+    tcl_vectors(t, 0x84, ident, 4);
+}
+
+/*
+ * A triangle from two vertex arrays in video memory: positions (x, y,
+ * z, w) and a second attribute of n floats per vertex.
+ */
+static void tcl_tri(Ctx *t, const float pos[3][4], const float *attr, int n)
+{
+    uint32_t vb[3 * 8];
+    uint32_t d[5];
+    int i, k;
+
+    for (i = 0; i < 3; i++) {
+        for (k = 0; k < 4; k++) {
+            vb[i * 4 + k] = cpu_to_le32(f2u(pos[i][k]));
+        }
+        for (k = 0; k < n; k++) {
+            vb[12 + i * n + k] = cpu_to_le32(f2u(attr[i * n + k]));
+        }
+    }
+    qpci_memwrite(t->dev, t->fb, VB, vb, (12 + 3 * n) * 4);
+    d[0] = 2;                                    /* two arrays */
+    d[1] = 4 | 4 << 8 | n << 16 | n << 24;      /* sizes and strides */
+    d[2] = VB;
+    d[3] = VB + 12 * 4;
+    pkt3(t, 0x2f, d, 4);                         /* 3D_LOAD_VBPNTR */
+    d[0] = PRIM_TRIS | (2 << 4) | (1 << 6) | 3 << 16;
+    pkt3(t, 0x34, d, 1);                         /* 3D_DRAW_VBUF_2 */
+}
+
+/* clip space to the viewport, and the perspective divide by w */
+static void test_tcl_transform(void)
+{
+    /* the second triangle is the first one at w = 2: half the size */
+    static const float pos[3][4] = {
+        { -0.5f, -0.5f, 0, 1 }, { 0.5f, -0.5f, 0, 1 }, { -0.5f, 0.5f, 0, 1 }
+    };
+    static const float pos2[3][4] = {
+        { 0.5f, 0.5f, 0, 2 }, { 1.5f, 0.5f, 0, 2 }, { 0.5f, 1.5f, 0, 2 }
+    };
+    static const float green[12] = { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+    static const float blue[12] = { 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1 };
+    Ctx t;
+
+    tcl_start(&t);
+    reg(&t, R200_SE_VTX_FMT_0, R200_VTX_Z0 | R200_VTX_W0 | R200_VTX_FP_RGBA0);
+    reg(&t, R200_SE_VTX_FMT_1, 0);
+    tcl_tri(&t, pos, green, 4);
+    tcl_tri(&t, pos2, blue, 4);
+    /* (16,16) (48,16) (16,48), and (40,40) (56,40) (40,56) */
+    g_assert_cmphex(pixel(&t, 20, 20), ==, GREEN);
+    g_assert_cmphex(pixel(&t, 36, 36), ==, BLACK);
+    g_assert_cmphex(pixel(&t, 43, 43), ==, BLUE);
+    g_assert_cmphex(pixel(&t, 58, 58), ==, BLACK);
+    stop(&t);
+}
+
+/* a directional light straight onto a red material */
+static void test_tcl_light(void)
+{
+    static const float pos[3][4] = {
+        { -1, -1, 0, 1 }, { 1, -1, 0, 1 }, { -1, 1, 0, 1 }
+    };
+    static const float nrm[9] = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+    static const float white[4] = { 1, 1, 1, 1 };
+    static const float dir[4] = { 0, 0, 1, 0 };
+    static const float red[4] = { 1, 0, 0, 1 };
+    static const float zero[4] = { 0, 0, 0, 0 };
+    Ctx t;
+
+    tcl_start(&t);
+    reg(&t, R200_SE_VTX_FMT_0, R200_VTX_Z0 | R200_VTX_W0 | R200_VTX_N0);
+    reg(&t, R200_SE_VTX_FMT_1, 0);
+    reg(&t, R200_TCL_LIGHT_MODEL_CTL_0, 1);      /* lighting on */
+    reg(&t, R200_TCL_LIGHT_MODEL_CTL_1, 0x1111); /* all from material 0 */
+    reg(&t, R200_TCL_PER_LIGHT_CTL_0, 1);        /* light 0, diffuse */
+    tcl_vectors(&t, 0x30, white, 1);             /* its diffuse colour */
+    tcl_vectors(&t, 0x40, dir, 1);               /* towards the light */
+    tcl_vectors(&t, 0x5c, zero, 1);              /* no global ambient */
+    tcl_vectors(&t, 0xb0, zero, 1);              /* no emission */
+    tcl_vectors(&t, 0xb1, zero, 1);              /* no ambient */
+    tcl_vectors(&t, 0xb2, red, 1);               /* diffuse */
+    tcl_tri(&t, pos, nrm, 3);
+    g_assert_cmphex(pixel(&t, 8, 8), ==, RED);
+    stop(&t);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -392,5 +560,7 @@ int main(int argc, char **argv)
     qtest_add_func("/ati-3d/mipmap", test_mipmap);
     qtest_add_func("/ati-3d/surface-swap", test_surface_swap);
     qtest_add_func("/ati-3d/color-order", test_color_order);
+    qtest_add_func("/ati-3d/tcl-transform", test_tcl_transform);
+    qtest_add_func("/ati-3d/tcl-light", test_tcl_light);
     return g_test_run();
 }

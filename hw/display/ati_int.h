@@ -157,6 +157,31 @@ typedef struct ATICPState {
     ATICPParser ib;
 } ATICPState;
 
+/* the vertex arrays of 3D_LOAD_VBPNTR */
+typedef struct ATIAos {
+    uint32_t addr;
+    uint8_t size;       /* dwords of a vertex */
+    uint8_t stride;     /* dwords from a vertex to the next */
+} ATIAos;
+
+#define ATI_TCL_VECTORS 0x200
+#define ATI_TCL_SCALARS 0x200
+#define ATI_AOS_MAX 16
+
+/* the memory of the transform and lighting engine, and its write ports */
+typedef struct ATITCLState {
+    float vec[ATI_TCL_VECTORS][4];
+    float scl[ATI_TCL_SCALARS];
+    uint32_t vec_idx;
+    uint32_t vec_stride;
+    uint32_t vec_dw;
+    uint32_t vec_dwords;
+    uint32_t scl_idx;
+    uint32_t scl_stride;
+    ATIAos aos[ATI_AOS_MAX];
+    int naos;
+} ATITCLState;
+
 struct ATIVGAState {
     PCIDevice dev;
     VGACommonState vga;
@@ -180,6 +205,7 @@ struct ATIVGAState {
     ATIVGARegs regs;
     ATIHostDataState host_data;
     ATICPState cp;
+    ATITCLState tcl;
     uint32_t *mmregs;   /* registers that are only stored */
 };
 
@@ -190,6 +216,7 @@ static inline bool ati_is_r200(ATIVGAState *s)
 }
 
 const char *ati_reg_name(int num);
+void ati_tcl_write(ATIVGAState *s, uint32_t addr, uint32_t val);
 void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size);
 
 #define ATI_SURFACES 8

@@ -79,9 +79,12 @@
 #define R3D_SE_VTX_FMT          0x2080
 
 /* R200 */
-#define R200_PP_CNTL_ALT        0x2cc0
 #define R200_SE_VTE_CNTL        0x20b0
 #define R200_VTX_ST_DENORM      BIT(12)
+#define R200_SE_VAP_CNTL        0x2080
+#define R200_VAP_TCL_ENABLE     BIT(0)
+#define R200_VAP_DX_CLIP_SPACE  BIT(22)
+#define R200_SE_VAP_CNTL_STATUS 0x2140
 #define R200_SE_VTX_FMT_0       0x2088
 #define R200_SE_VTX_FMT_1       0x208c
 #define R200_PP_TXFILTER(n)     (0x2c00 + (n) * 0x20)
@@ -288,6 +291,14 @@ typedef struct ATI3DCtx {
     int units;
     ATITexture tex[ATI_3D_UNITS];
     uint32_t dirty_lo, dirty_hi;
+    /*
+     * With the R200's transform and lighting on, the vertices are in clip
+     * space (rhw holds w): they are clipped and projected to the window
+     * just before they are drawn.
+     */
+    bool tcl;
+    uint32_t vte_cntl;
+    float vport[6];             /* x, y and z scale and offset */
 } ATI3DCtx;
 
 static inline uint32_t r3d(ATIVGAState *s, uint32_t reg)
@@ -302,6 +313,14 @@ static inline float u2f(uint32_t v)
         float f;
     } x = { .u = v };
     return x.f;
+}
+
+static inline uint32_t f2u(float f)
+{
+    uint32_t v;
+
+    memcpy(&v, &f, sizeof(v));
+    return v;
 }
 
 static inline float clampf(float v)
@@ -1598,6 +1617,123 @@ static void ati_vertex_sub_add(ATIVertex *o, const ATIVertex *a,
     }
 }
 
+/*
+ * Transform and lighting output: from clip space to the window. The
+ * perspective divide is left out for x and y, or for z, when SE_VTE_CNTL
+ * says they come already divided, and the viewport is applied where it
+ * enables it.
+ */
+#define R200_VTE_XY_FMT         BIT(8)
+#define R200_VTE_Z_FMT          BIT(9)
+
+static bool ati_tcl_project(ATI3DCtx *c, const ATIVertex *in, ATIVertex *out)
+{
+    float w = in->rhw;
+    float iw;
+    int i;
+
+    if (!(w > 1e-20f) || !isfinite(w)) {
+        return false;
+    }
+    iw = 1.0f / w;
+    *out = *in;
+    out->rhw = iw;
+    if (!(c->vte_cntl & R200_VTE_XY_FMT)) {
+        out->x *= iw;
+        out->y *= iw;
+    }
+    if (!(c->vte_cntl & R200_VTE_Z_FMT)) {
+        out->z *= iw;
+    }
+    for (i = 0; i < 3; i++) {
+        float *p = i == 0 ? &out->x : i == 1 ? &out->y : &out->z;
+
+        if (c->vte_cntl & BIT(i * 2)) {
+            *p *= c->vport[i * 2];
+        }
+        if (c->vte_cntl & BIT(i * 2 + 1)) {
+            *p += c->vport[i * 2 + 1];
+        }
+    }
+    return isfinite(out->x) && isfinite(out->y) && isfinite(out->z);
+}
+
+/* the distance of a clip space vertex inside the near plane */
+static float ati_tcl_near(const ATI3DCtx *c, const ATIVertex *v)
+{
+    /* OpenGL keeps -w <= z, Direct3D 0 <= z */
+    return (r3d(c->s, R200_SE_VAP_CNTL) & R200_VAP_DX_CLIP_SPACE) ?
+           v->z : v->z + v->rhw;
+}
+
+static void ati_vertex_lerp(ATIVertex *out, const ATIVertex *a,
+                            const ATIVertex *b, float t)
+{
+    const float *pa = &a->x, *pb = &b->x;
+    float *po = &out->x;
+    int i;
+
+    for (i = 0; i < 4 + ATI_ATTRS; i++) {
+        po[i] = pa[i] + (pb[i] - pa[i]) * t;
+    }
+}
+
+static void ati_prim_tri(ATI3DCtx *c, const ATIVertex *v0,
+                         const ATIVertex *v1, const ATIVertex *v2)
+{
+    const ATIVertex *in[3] = { v0, v1, v2 };
+    ATIVertex poly[4], win[4];
+    int i, n = 0;
+
+    if (!c->tcl) {
+        ati_triangle(c, v0, v1, v2);
+        return;
+    }
+    /* clip against the near plane: a triangle becomes up to a quad */
+    for (i = 0; i < 3; i++) {
+        const ATIVertex *a = in[i], *b = in[(i + 1) % 3];
+        float da = ati_tcl_near(c, a), db = ati_tcl_near(c, b);
+
+        if (da >= 0) {
+            poly[n++] = *a;
+        }
+        if ((da >= 0) != (db >= 0)) {
+            ati_vertex_lerp(&poly[n++], a, b, da / (da - db));
+        }
+    }
+    for (i = 0; i < n; i++) {
+        if (!ati_tcl_project(c, &poly[i], &win[i])) {
+            return;
+        }
+    }
+    for (i = 1; i + 1 < n; i++) {
+        ati_triangle(c, &win[0], &win[i], &win[i + 1]);
+    }
+}
+
+static void ati_prim_line(ATI3DCtx *c, const ATIVertex *v0,
+                          const ATIVertex *v1)
+{
+    ATIVertex a, b;
+
+    if (!c->tcl) {
+        ati_line(c, v0, v1);
+    } else if (ati_tcl_project(c, v0, &a) && ati_tcl_project(c, v1, &b)) {
+        ati_line(c, &a, &b);
+    }
+}
+
+static void ati_prim_point(ATI3DCtx *c, const ATIVertex *v)
+{
+    ATIVertex a;
+
+    if (!c->tcl) {
+        ati_point(c, v);
+    } else if (ati_tcl_project(c, v, &a)) {
+        ati_point(c, &a);
+    }
+}
+
 static void ati_prims(ATI3DCtx *c, int prim, ATIVertex *v, int n)
 {
     int i;
@@ -1607,36 +1743,36 @@ static void ati_prims(ATI3DCtx *c, int prim, ATIVertex *v, int n)
         break;
     case 1: /* point list */
         for (i = 0; i < n; i++) {
-            ati_point(c, &v[i]);
+            ati_prim_point(c, &v[i]);
         }
         break;
     case 2: /* line list */
         for (i = 0; i + 1 < n; i += 2) {
-            ati_line(c, &v[i], &v[i + 1]);
+            ati_prim_line(c, &v[i], &v[i + 1]);
         }
         break;
     case 3: /* line strip */
         for (i = 0; i + 1 < n; i++) {
-            ati_line(c, &v[i], &v[i + 1]);
+            ati_prim_line(c, &v[i], &v[i + 1]);
         }
         break;
     case 4: /* triangle list */
         for (i = 0; i + 2 < n; i += 3) {
-            ati_triangle(c, &v[i], &v[i + 1], &v[i + 2]);
+            ati_prim_tri(c, &v[i], &v[i + 1], &v[i + 2]);
         }
         break;
     case 5: /* triangle fan */
     case 15: /* polygon */
         for (i = 1; i + 1 < n; i++) {
-            ati_triangle(c, &v[0], &v[i], &v[i + 1]);
+            ati_prim_tri(c, &v[0], &v[i], &v[i + 1]);
         }
         break;
     case 6: /* triangle strip: every other one turns the other way */
         for (i = 0; i + 2 < n; i++) {
             if (i & 1) {
-                ati_triangle(c, &v[i + 1], &v[i], &v[i + 2]);
+                ati_prim_tri(c, &v[i + 1], &v[i], &v[i + 2]);
             } else {
-                ati_triangle(c, &v[i], &v[i + 1], &v[i + 2]);
+                ati_prim_tri(c, &v[i], &v[i + 1], &v[i + 2]);
             }
         }
         break;
@@ -1645,20 +1781,20 @@ static void ati_prims(ATI3DCtx *c, int prim, ATIVertex *v, int n)
             ATIVertex d;
 
             ati_vertex_sub_add(&d, &v[i], &v[i + 1], &v[i + 2]);
-            ati_triangle(c, &v[i], &v[i + 1], &v[i + 2]);
-            ati_triangle(c, &v[i], &v[i + 2], &d);
+            ati_prim_tri(c, &v[i], &v[i + 1], &v[i + 2]);
+            ati_prim_tri(c, &v[i], &v[i + 2], &d);
         }
         break;
     case 13: /* quad list */
         for (i = 0; i + 3 < n; i += 4) {
-            ati_triangle(c, &v[i], &v[i + 1], &v[i + 2]);
-            ati_triangle(c, &v[i], &v[i + 2], &v[i + 3]);
+            ati_prim_tri(c, &v[i], &v[i + 1], &v[i + 2]);
+            ati_prim_tri(c, &v[i], &v[i + 2], &v[i + 3]);
         }
         break;
     case 14: /* quad strip */
         for (i = 0; i + 3 < n; i += 2) {
-            ati_triangle(c, &v[i], &v[i + 1], &v[i + 3]);
-            ati_triangle(c, &v[i], &v[i + 3], &v[i + 2]);
+            ati_prim_tri(c, &v[i], &v[i + 1], &v[i + 3]);
+            ati_prim_tri(c, &v[i], &v[i + 3], &v[i + 2]);
         }
         break;
     default:
@@ -1860,9 +1996,11 @@ static void r200_vtx_parse(uint32_t fmt0, uint32_t fmt1, uint32_t vf,
         case 3: /* float RGBA */
             for (k = 0; k < (R200_VTX_COLOR(fmt0, n) == 3 ? 4 : 3); k++) {
                 float f = u2f(d[i++]);
+                /* without VF_COLOR_ORDER_RGBA blue comes first */
+                int ch = k < 3 && !(vf & VF_COLOR_ORDER_RGBA) ? 2 - k : k;
 
-                if (dst && (n == 0 || k < 3)) {
-                    dst[k] = f;
+                if (dst && (n == 0 || ch < 3)) {
+                    dst[ch] = f;
                 }
             }
             break;
@@ -1925,14 +2063,8 @@ static bool ati_3d_setup(ATIVGAState *s, ATI3DCtx *c)
     c->blendcntl = r3d(s, R3D_BLENDCNTL);
     c->planemask = r3d(s, R3D_PLANEMASK);
     c->rop = r3d(s, R3D_ROPCNTL);
+    /* on the R200, 0x2cc0 is PP_CNTL too (see ati_r200_alias) */
     c->pp_cntl = r3d(s, R3D_PP_CNTL);
-    if (c->r200) {
-        /*
-         * AmigaOS's R200 driver writes the texture and stage enables, in
-         * the layout of PP_CNTL, to 0x2cc0 and leaves PP_CNTL at 0.
-         */
-        c->pp_cntl |= r3d(s, R200_PP_CNTL_ALT);
-    }
     c->pp_misc = r3d(s, R3D_PP_MISC);
     c->se_cntl = r3d(s, R3D_SE_CNTL);
     c->coord_fmt = r3d(s, R3D_SE_COORD_FMT);
@@ -2088,6 +2220,563 @@ static void ati_3d_draw_buffer(ATIVGAState *s, const uint32_t *d, uint32_t n)
     g_free(buf);
 }
 
+/*
+ * R200 transform and lighting (TCL), the fixed function of OpenGL 1.x:
+ * TinyGL on MorphOS draws through it. The driver loads matrices, lights
+ * and materials into the vector and scalar memories through
+ * SE_TCL_VECTOR/SCALAR_INDX_REG and _DATA_REG, points 3D_LOAD_VBPNTR at
+ * its vertex arrays and draws them with 3D_DRAW_VBUF_2 or 3D_DRAW_INDX_2.
+ */
+
+#define R200_SE_TCL_MATRIX_SEL(n)       (0x2230 + (n) * 4)
+#define R200_SE_TCL_OUTPUT_VTX_FMT_1    0x2094
+#define R200_SE_TCL_LIGHT_MODEL_CTL_0   0x2268
+#define R200_SE_TCL_LIGHT_MODEL_CTL_1   0x226c
+#define R200_SE_TCL_PER_LIGHT_CTL(n)    (0x2270 + ((n) / 2) * 4)
+#define R200_SE_TCL_TEX_PROC_CTL_0      0x22b0
+#define R200_SE_TCL_UCP_VERT_BLEND_CTL  0x22c0
+#define R200_SE_VPORT_XSCALE            0x1d98
+
+/* LIGHT_MODEL_CTL_0 */
+#define R200_LIGHTING_ENABLE            BIT(0)
+#define R200_LOCAL_VIEWER               BIT(2)
+#define R200_NORMALIZE_NORMALS          BIT(3)
+#define R200_SPECULAR_LIGHTS            BIT(5)
+#define R200_DIFFUSE_SPECULAR_COMBINE   BIT(6)
+
+/* PER_LIGHT_CTL, for each light */
+#define R200_LIGHT_ENABLE               BIT(0)
+#define R200_LIGHT_ENABLE_AMBIENT       BIT(1)
+#define R200_LIGHT_ENABLE_SPECULAR      BIT(2)
+#define R200_LIGHT_IS_LOCAL             BIT(3)
+#define R200_LIGHT_IS_SPOT              BIT(4)
+#define R200_LIGHT_RANGE_ATTEN          BIT(6)
+#define R200_LIGHT_CONSTANT_RANGE_ATTEN BIT(7)
+
+/* the vector memory */
+#define R200_VS_LIGHT_AMBIENT           0x28
+#define R200_VS_LIGHT_DIFFUSE           0x30
+#define R200_VS_LIGHT_SPECULAR          0x38
+#define R200_VS_LIGHT_DIRPOS            0x40
+#define R200_VS_LIGHT_HWVSPOT           0x48
+#define R200_VS_LIGHT_ATTENUATION       0x50
+#define R200_VS_GLOBAL_AMBIENT          0x5c
+#define R200_VS_MATRIX(n)               (0x80 + (n) * 4)
+#define R200_VS_MAT_EMISS(m)            (0xb0 + (m) * 4)
+/* the scalar memory */
+#define R200_SS_LIGHT_SPOT_EXPONENT     0x10
+#define R200_SS_LIGHT_SPOT_CUTOFF       0x18
+#define R200_SS_LIGHT_ATT_CONST_INV     0x30
+#define R200_SS_MAT_SHININESS(m)        (0x100 + (m))
+
+void ati_tcl_write(ATIVGAState *s, uint32_t addr, uint32_t val)
+{
+    ATITCLState *t = &s->tcl;
+
+    switch (addr) {
+    case 0x2200: /* SE_TCL_VECTOR_INDX_REG */
+        t->vec_idx = val & 0xffff;
+        t->vec_stride = (val >> 16) & 0xff;
+        t->vec_dwords = (val >> 28) ? (val >> 28) : 4;
+        t->vec_dw = 0;
+        break;
+    case 0x2204: /* SE_TCL_VECTOR_DATA_REG */
+        if (t->vec_idx < ATI_TCL_VECTORS && t->vec_dw < 4) {
+            t->vec[t->vec_idx][t->vec_dw] = u2f(val);
+        }
+        if (++t->vec_dw >= t->vec_dwords) {
+            t->vec_dw = 0;
+            t->vec_idx += t->vec_stride;
+        }
+        break;
+    case 0x2208: /* SE_TCL_SCALAR_INDX_REG */
+        t->scl_idx = val & 0xffff;
+        t->scl_stride = (val >> 16) & 0xff;
+        break;
+    case 0x220c: /* SE_TCL_SCALAR_DATA_REG */
+        if (t->scl_idx < ATI_TCL_SCALARS) {
+            t->scl[t->scl_idx] = u2f(val);
+        }
+        t->scl_idx += t->scl_stride;
+        break;
+    }
+}
+
+/* a vertex as it goes into the TCL */
+typedef struct R200TclIn {
+    float pos[4];
+    float nrm[3];
+    float col[2][4];
+    float tex[6][4];
+} R200TclIn;
+
+static void r200_tcl_in(uint32_t fmt0, uint32_t fmt1, uint32_t vf,
+                        const uint32_t *d, R200TclIn *in)
+{
+    int i = 0, n, k;
+
+    in->pos[0] = u2f(d[i++]);
+    in->pos[1] = u2f(d[i++]);
+    in->pos[2] = fmt0 & R200_VTX_Z0 ? u2f(d[i++]) : 0.0f;
+    in->pos[3] = fmt0 & R200_VTX_W0 ? u2f(d[i++]) : 1.0f;
+    i += R200_VTX_WEIGHTS(fmt0);
+    in->nrm[0] = 0.0f;
+    in->nrm[1] = 0.0f;
+    in->nrm[2] = 1.0f;
+    if (fmt0 & R200_VTX_N0) {
+        for (k = 0; k < 3; k++) {
+            in->nrm[k] = u2f(d[i++]);
+        }
+    }
+    i += !!(fmt0 & R200_VTX_POINT_SIZE) + !!(fmt0 & R200_VTX_DISCRETE_FOG);
+    i += !!(fmt0 & R200_VTX_SHININESS_0) + !!(fmt0 & R200_VTX_SHININESS_1);
+    for (n = 0; n < 2; n++) {
+        for (k = 0; k < 4; k++) {
+            in->col[n][k] = n ? 0.0f : 1.0f;
+        }
+    }
+    for (n = 0; n < 8; n++) {
+        float tmp[4] = { 0, 0, 0, 1 };
+
+        switch (R200_VTX_COLOR(fmt0, n)) {
+        case 1:
+            ati_unpack_color(d[i++], vf & VF_COLOR_ORDER_RGBA, tmp);
+            break;
+        case 2:
+        case 3:
+            for (k = 0; k < (R200_VTX_COLOR(fmt0, n) == 3 ? 4 : 3); k++) {
+                /* without VF_COLOR_ORDER_RGBA blue comes first */
+                tmp[k < 3 && !(vf & VF_COLOR_ORDER_RGBA) ? 2 - k : k] =
+                    u2f(d[i++]);
+            }
+            break;
+        default:
+            continue;
+        }
+        if (n < 2) {
+            memcpy(in->col[n], tmp, sizeof(tmp));
+        }
+    }
+    for (n = 0; n < 6; n++) {
+        int cnt = (fmt1 >> (n * 3)) & 7;
+
+        in->tex[n][0] = in->tex[n][1] = in->tex[n][2] = 0.0f;
+        in->tex[n][3] = 1.0f;
+        for (k = 0; k < cnt; k++) {
+            float f = u2f(d[i++]);
+
+            if (k < 4) {
+                in->tex[n][k] = f;
+            }
+        }
+    }
+}
+
+/* one of the matrices: each vector of it is a row */
+static void r200_tcl_mul(ATIVGAState *s, int mtx, const float in[4],
+                         float out[4])
+{
+    const float (*m)[4] = &s->tcl.vec[R200_VS_MATRIX(mtx & 0xf)];
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        out[i] = m[i][0] * in[0] + m[i][1] * in[1] + m[i][2] * in[2] +
+                 m[i][3] * in[3];
+    }
+}
+
+static float dot3(const float *a, const float *b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static void normalize3(float *v)
+{
+    float l = sqrtf(dot3(v, v));
+
+    if (l > 1e-20f) {
+        v[0] /= l;
+        v[1] /= l;
+        v[2] /= l;
+    }
+}
+
+/*
+ * The source of a material colour (LIGHT_MODEL_CTL_1): the light colours
+ * premultiplied, material 0 or 1, or a vertex colour.
+ */
+static const float *r200_tcl_src(ATIVGAState *s, int src, int which,
+                                 const R200TclIn *in)
+{
+    static const float one[4] = { 1, 1, 1, 1 };
+
+    switch (src) {
+    case 0:
+        return one;
+    case 1:
+        return s->tcl.vec[R200_VS_MAT_EMISS(0) + which];
+    case 2 ... 3:
+        return in->col[src - 2];
+    case 0xf:
+        return s->tcl.vec[R200_VS_MAT_EMISS(1) + which];
+    default:
+        return one;
+    }
+}
+
+/* lighting of the front face: OpenGL's colour sum */
+static void r200_tcl_light(ATIVGAState *s, const R200TclIn *in,
+                           const float eye[4], const float nrm[3],
+                           float col[4], float spec[4])
+{
+    uint32_t lm0 = r3d(s, R200_SE_TCL_LIGHT_MODEL_CTL_0);
+    uint32_t lm1 = r3d(s, R200_SE_TCL_LIGHT_MODEL_CTL_1);
+    const float *emis = r200_tcl_src(s, lm1 & 0xf, 0, in);
+    const float *amb = r200_tcl_src(s, (lm1 >> 4) & 0xf, 1, in);
+    const float *dif = r200_tcl_src(s, (lm1 >> 8) & 0xf, 2, in);
+    const float *spc = r200_tcl_src(s, (lm1 >> 12) & 0xf, 3, in);
+    const float *gamb = s->tcl.vec[R200_VS_GLOBAL_AMBIENT];
+    float shin = s->tcl.scl[R200_SS_MAT_SHININESS(0)];
+    float v[3] = { 0, 0, 1 };
+    int n, k;
+
+    if (lm0 & R200_LOCAL_VIEWER) {
+        v[0] = -eye[0];
+        v[1] = -eye[1];
+        v[2] = -eye[2];
+        normalize3(v);
+    }
+    for (k = 0; k < 3; k++) {
+        col[k] = emis[k] + amb[k] * gamb[k];
+        spec[k] = 0.0f;
+    }
+    col[3] = dif[3];
+    for (n = 0; n < 8; n++) {
+        uint32_t pl = r3d(s, R200_SE_TCL_PER_LIGHT_CTL(n)) >> ((n & 1) * 16);
+        const float *lamb = s->tcl.vec[R200_VS_LIGHT_AMBIENT + n];
+        const float *ldif = s->tcl.vec[R200_VS_LIGHT_DIFFUSE + n];
+        const float *lspc = s->tcl.vec[R200_VS_LIGHT_SPECULAR + n];
+        const float *pos = s->tcl.vec[R200_VS_LIGHT_DIRPOS + n];
+        const float *dir = s->tcl.vec[R200_VS_LIGHT_HWVSPOT + n];
+        const float *att = s->tcl.vec[R200_VS_LIGHT_ATTENUATION + n];
+        float l[3], h[3], f = 1.0f, ndl, ndh;
+
+        if (!(pl & R200_LIGHT_ENABLE)) {
+            continue;
+        }
+        if (pl & R200_LIGHT_IS_LOCAL) {
+            float d2, d;
+
+            for (k = 0; k < 3; k++) {
+                l[k] = pos[k] - eye[k];
+            }
+            d2 = dot3(l, l);
+            d = sqrtf(d2);
+            normalize3(l);
+            if (pl & R200_LIGHT_RANGE_ATTEN) {
+                if (pl & R200_LIGHT_CONSTANT_RANGE_ATTEN) {
+                    f = s->tcl.scl[R200_SS_LIGHT_ATT_CONST_INV + n];
+                } else {
+                    float q = att[2] + att[1] * d + att[0] * d2;
+
+                    f = q > 1e-20f ? 1.0f / q : 1.0f;
+                }
+            }
+            if (pl & R200_LIGHT_IS_SPOT) {
+                /* the direction holds minus the spot direction */
+                float cs = dot3(l, dir);
+
+                f *= cs >= s->tcl.scl[R200_SS_LIGHT_SPOT_CUTOFF + n] ?
+                     powf(MAX(cs, 0.0f),
+                          s->tcl.scl[R200_SS_LIGHT_SPOT_EXPONENT + n]) : 0.0f;
+            }
+            for (k = 0; k < 3; k++) {
+                h[k] = l[k] + v[k];
+            }
+            normalize3(h);
+        } else {
+            /* the direction to the light and the half vector, normalized */
+            memcpy(l, pos, sizeof(l));
+            if (lm0 & R200_LOCAL_VIEWER) {
+                for (k = 0; k < 3; k++) {
+                    h[k] = l[k] + v[k];
+                }
+                normalize3(h);
+            } else {
+                memcpy(h, dir, sizeof(h));
+            }
+        }
+        ndl = dot3(nrm, l);
+        for (k = 0; k < 3; k++) {
+            float c = 0.0f;
+
+            if (pl & R200_LIGHT_ENABLE_AMBIENT) {
+                c += amb[k] * lamb[k];
+            }
+            if (ndl > 0) {
+                c += ndl * dif[k] * ldif[k];
+            }
+            col[k] += f * c;
+        }
+        ndh = dot3(nrm, h);
+        if ((lm0 & R200_SPECULAR_LIGHTS) && (pl & R200_LIGHT_ENABLE_SPECULAR) &&
+            ndl > 0 && ndh > 0) {
+            float p = shin > 0 ? powf(ndh, shin) : 1.0f;
+
+            for (k = 0; k < 3; k++) {
+                spec[k] += f * p * spc[k] * lspc[k];
+            }
+        }
+    }
+    if (lm0 & R200_DIFFUSE_SPECULAR_COMBINE) {
+        for (k = 0; k < 3; k++) {
+            col[k] += spec[k];
+            spec[k] = 0.0f;
+        }
+    }
+    for (k = 0; k < 4; k++) {
+        col[k] = clampf(col[k]);
+        spec[k] = clampf(spec[k]);
+    }
+}
+
+/* a vertex through the TCL: clip space position in x, y, z and rhw */
+static void r200_tcl_vertex(ATIVGAState *s, const R200TclIn *in, ATIVertex *v)
+{
+    uint32_t sel2 = r3d(s, R200_SE_TCL_MATRIX_SEL(2));
+    uint32_t tex0 = r3d(s, R200_SE_TCL_TEX_PROC_CTL_0);
+    uint32_t out1 = r3d(s, R200_SE_TCL_OUTPUT_VTX_FMT_1);
+    float clip[4];
+    int n;
+
+    memset(v, 0, sizeof(*v));
+    r200_tcl_mul(s, sel2 & 0xff, in->pos, clip);
+    v->x = clip[0];
+    v->y = clip[1];
+    v->z = clip[2];
+    v->rhw = clip[3];
+    if (r3d(s, R200_SE_TCL_LIGHT_MODEL_CTL_0) & R200_LIGHTING_ENABLE) {
+        float eye[4], n4[4] = { in->nrm[0], in->nrm[1], in->nrm[2], 0 };
+        float nrm[4];
+
+        r200_tcl_mul(s, r3d(s, R200_SE_TCL_MATRIX_SEL(0)) & 0xff, in->pos,
+                     eye);
+        if (eye[3] != 0.0f && eye[3] != 1.0f) {
+            eye[0] /= eye[3];
+            eye[1] /= eye[3];
+            eye[2] /= eye[3];
+        }
+        r200_tcl_mul(s, r3d(s, R200_SE_TCL_MATRIX_SEL(1)) & 0xff, n4, nrm);
+        if (r3d(s, R200_SE_TCL_LIGHT_MODEL_CTL_0) & R200_NORMALIZE_NORMALS) {
+            normalize3(nrm);
+        }
+        r200_tcl_light(s, in, eye, nrm, v->c, v->spec);
+    } else {
+        memcpy(v->c, in->col[0], sizeof(v->c));
+        memcpy(v->spec, in->col[1], 3 * sizeof(float));
+    }
+    v->spec[3] = 1.0f;
+    for (n = 0; n < ATI_3D_UNITS; n++) {
+        float tc[4];
+
+        if (!((out1 >> (n * 3)) & 7)) {
+            continue;
+        }
+        memcpy(tc, in->tex[n], sizeof(tc));
+        if (tex0 & BIT(8 + n)) {
+            /* TEXMAT_n_ENABLE: MATRIX_SEL_3 and _4 pick the matrices */
+            uint32_t sel = r3d(s, R200_SE_TCL_MATRIX_SEL(3 + n / 4));
+            float out[4];
+
+            r200_tcl_mul(s, (sel >> ((n % 4) * 8)) & 0xff, tc, out);
+            memcpy(tc, out, sizeof(tc));
+        }
+        v->tc[n][0] = tc[0];
+        v->tc[n][1] = tc[1];
+        v->tc[n][2] = tc[3] != 0.0f ? tc[3] : 1.0f;
+    }
+}
+
+/* 3D_LOAD_VBPNTR: the number of arrays, then size, stride and address */
+static void r200_load_vbpntr(ATIVGAState *s, const uint32_t *d, uint32_t n)
+{
+    ATITCLState *t = &s->tcl;
+    uint32_t i, k = 1;
+
+    if (!n) {
+        return;
+    }
+    t->naos = MIN(d[0] & 0x1f, ATI_AOS_MAX);
+    for (i = 0; i < t->naos; i += 2) {
+        uint32_t attr;
+
+        if (k >= n) {
+            t->naos = i;
+            return;
+        }
+        attr = d[k++];
+        t->aos[i].size = attr & 0xff;
+        t->aos[i].stride = (attr >> 8) & 0xff;
+        t->aos[i].addr = k < n ? d[k++] : 0;
+        if (i + 1 < t->naos) {
+            t->aos[i + 1].size = (attr >> 16) & 0xff;
+            t->aos[i + 1].stride = attr >> 24;
+            t->aos[i + 1].addr = k < n ? d[k++] : 0;
+        }
+    }
+}
+
+/* the attributes of an R200 vertex, in the order of its dwords */
+typedef struct R200Attr {
+    int count;
+} R200Attr;
+
+static int r200_vtx_attrs(uint32_t fmt0, uint32_t fmt1, R200Attr *attr)
+{
+    static const int color[4] = { 0, 1, 3, 4 };
+    int n = 0, i;
+
+    attr[n++].count = 2 + !!(fmt0 & R200_VTX_Z0) + !!(fmt0 & R200_VTX_W0);
+    if (R200_VTX_WEIGHTS(fmt0)) {
+        attr[n++].count = R200_VTX_WEIGHTS(fmt0);
+    }
+    if (fmt0 & R200_VTX_N0) {
+        attr[n++].count = 3;
+    }
+    if (fmt0 & R200_VTX_POINT_SIZE) {
+        attr[n++].count = 1;
+    }
+    if (fmt0 & R200_VTX_DISCRETE_FOG) {
+        attr[n++].count = 1;
+    }
+    if (fmt0 & R200_VTX_SHININESS_0) {
+        attr[n++].count = 1;
+    }
+    if (fmt0 & R200_VTX_SHININESS_1) {
+        attr[n++].count = 1;
+    }
+    for (i = 0; i < 8; i++) {
+        if (R200_VTX_COLOR(fmt0, i)) {
+            attr[n++].count = color[R200_VTX_COLOR(fmt0, i)];
+        }
+    }
+    for (i = 0; i < 6; i++) {
+        if ((fmt1 >> (i * 3)) & 7) {
+            attr[n++].count = (fmt1 >> (i * 3)) & 7;
+        }
+    }
+    return n;
+}
+
+/*
+ * 3D_DRAW_VBUF_2 and 3D_DRAW_INDX_2: the vertices are gathered from the
+ * arrays, an array for each attribute of SE_VTX_FMT_0 and _1, with the
+ * byte swap of SE_VAP_CNTL_STATUS, then go through the TCL if it is on.
+ */
+static void r200_draw_aos(ATIVGAState *s, uint32_t vf, const uint32_t *idx,
+                          uint32_t nidx)
+{
+    ATITCLState *t = &s->tcl;
+    uint32_t fmt0 = r3d(s, R200_SE_VTX_FMT_0), fmt1 = r3d(s, R200_SE_VTX_FMT_1);
+    int swap = r3d(s, R200_SE_VAP_CNTL_STATUS) & 3;
+    uint32_t count = MIN(VF_NUM_VERTICES(vf), ATI_3D_MAX_VERTS);
+    uint32_t nvtx = 0, size, i, j, a;
+    uint32_t *arr[ATI_AOS_MAX] = { NULL }, *buf;
+    R200Attr attr[32];
+    int nattr;
+    ATI3DCtx c;
+    ATIVertex *v;
+
+    if (idx) {
+        count = MIN(count, nidx * 2);
+    }
+    trace_ati_3d_vbuf(vf, fmt0, t->naos,
+                      t->aos[0].size | t->aos[0].stride << 8,
+                      t->aos[1].size | t->aos[1].stride << 8,
+                      t->aos[2].size | t->aos[2].stride << 8,
+                      t->aos[3].size | t->aos[3].stride << 8);
+    if (!count || !t->naos) {
+        return;
+    }
+    /* how many vertices the arrays must hold */
+    for (i = 0; i < count; i++) {
+        j = idx ? (idx[i / 2] >> ((i & 1) * 16)) & 0xffff : i;
+        nvtx = MAX(nvtx, j + 1);
+    }
+    for (a = 0; a < t->naos; a++) {
+        uint32_t len = ((nvtx - 1) * t->aos[a].stride + t->aos[a].size) * 4;
+
+        arr[a] = g_malloc0(len);
+        ati_gpu_rw(s, t->aos[a].addr, arr[a], len, false);
+        for (j = 0; j < len / 4; j++) {
+            uint32_t w = le32_to_cpu(arr[a][j]);
+
+            arr[a][j] = swap == 2 ? bswap32(w) :
+                        swap == 1 ? ((w & 0x00ff00ff) << 8) |
+                                    ((w >> 8) & 0x00ff00ff) : w;
+        }
+    }
+    /*
+     * Each attribute of SE_VTX_FMT_0 and _1 comes from its own array, with
+     * as many components as the array has; the ones it lacks get their
+     * defaults (z 0, w 1, alpha 1), as the vertex format expects them.
+     */
+    nattr = r200_vtx_attrs(fmt0, fmt1, attr);
+    size = r200_vtx_dwords(fmt0, fmt1);
+    buf = g_new0(uint32_t, (size_t)count * size + 64);
+    for (i = 0; i < count; i++) {
+        uint32_t *dst = buf + (size_t)i * size;
+
+        j = idx ? (idx[i / 2] >> ((i & 1) * 16)) & 0xffff : i;
+        for (a = 0; a < nattr; a++) {
+            int k, have = a < t->naos ? t->aos[a].size : 0;
+
+            for (k = 0; k < attr[a].count; k++) {
+                dst[k] = k < have ? arr[a][j * t->aos[a].stride + k] :
+                         f2u(k == 3 ? 1.0f : 0.0f);
+            }
+            dst += attr[a].count;
+        }
+    }
+    for (a = 0; a < t->naos; a++) {
+        g_free(arr[a]);
+    }
+
+    if (!(r3d(s, R200_SE_VAP_CNTL) & R200_VAP_TCL_ENABLE)) {
+        /* already transformed: the arrays hold the vertices to draw */
+        ati_3d_draw(s, fmt0, (vf & 0xffff) | count << 16, buf,
+                    count * size, NULL, 0);
+        g_free(buf);
+        return;
+    }
+    if (!ati_3d_setup(s, &c)) {
+        g_free(buf);
+        return;
+    }
+    c.tcl = true;
+    c.vte_cntl = r3d(s, R200_SE_VTE_CNTL);
+    for (i = 0; i < 6; i++) {
+        c.vport[i] = u2f(r3d(s, R200_SE_VPORT_XSCALE + i * 4));
+    }
+    v = g_new(ATIVertex, count);
+    for (i = 0; i < count; i++) {
+        R200TclIn in;
+
+        r200_tcl_in(fmt0, fmt1, vf, buf + (size_t)i * size, &in);
+        r200_tcl_vertex(s, &in, &v[i]);
+        trace_ati_3d_tcl_vertex(in.col[0][0] * 1000, in.col[0][1] * 1000,
+                                in.col[0][2] * 1000, v[i].x * 1000,
+                                v[i].y * 1000, v[i].z * 1000,
+                                v[i].rhw * 1000, v[i].c[0] * 255,
+                                v[i].c[1] * 255, v[i].c[2] * 255);
+    }
+    trace_ati_3d_draw(VF_PRIM(vf), count, fmt0, c.tex[0].enabled);
+    ati_prims(&c, VF_PRIM(vf), v, count);
+    g_free(v);
+    g_free(buf);
+    ati_3d_finish(&c);
+}
+
 void ati_3d_packet(ATIVGAState *s, uint8_t op, const uint32_t *d, uint32_t n)
 {
     switch (op) {
@@ -2099,6 +2788,19 @@ void ati_3d_packet(ATIVGAState *s, uint8_t op, const uint32_t *d, uint32_t n)
     case 0x29: /* 3D_DRAW_IMMD: vertex format, VF_CNTL, vertices */
         if (n >= 2) {
             ati_3d_draw_vertices(s, d[0], d[1], d + 2, n - 2);
+        }
+        break;
+    case 0x2f: /* 3D_LOAD_VBPNTR */
+        r200_load_vbpntr(s, d, n);
+        break;
+    case 0x34: /* 3D_DRAW_VBUF_2: VF_CNTL */
+        if (n >= 1) {
+            r200_draw_aos(s, d[0], NULL, 0);
+        }
+        break;
+    case 0x36: /* 3D_DRAW_INDX_2: VF_CNTL, then the indices */
+        if (n >= 1) {
+            r200_draw_aos(s, d[0], d + 1, n - 1);
         }
         break;
     case 0x35: /* 3D_DRAW_IMMD_2: VF_CNTL, vertices */

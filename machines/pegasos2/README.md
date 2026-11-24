@@ -56,6 +56,11 @@ AGP card runs as a PCI one there.
   until something about it is changed. NetStack only gets the interfaces
   that the prefs write; `ENV:sys/Interfaces` by hand and `NetConfig` do not
   add one to a running NetStack.
+- 3D through TinyGL needs an R200: with `-device
+  ati-vga,model=rv250,vgamem_mb=64,romfile=,bus=pci.0` instead of the
+  Radeon 7000, TinyGL's `r200.library` draws the 3D screen blankers
+  (Atlantis, Gears, BlockTube, GLMatrix and the others) through the
+  R200's transform and lighting. TinyGL has no driver for the R100.
 - AHI's speaker picture in Prefs/Audio is not a test button; `C:Play` plays
   a sample.
 - Install: First Flight, Installation, New Installation, automatic

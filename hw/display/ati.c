@@ -178,6 +178,53 @@ static inline void ati_reg_write_offs(uint32_t *reg, int offs,
                                       uint64_t data, unsigned int size);
 
 /*
+ * The R200 still takes the R100 registers of texture units 0 to 2 (filter,
+ * format, offset, size and pitch of non power of two textures), as the
+ * MorphOS Radeon driver sets them; they write the R200 ones. PP_CNTL and
+ * the viewport have second addresses.
+ */
+static uint32_t ati_r200_alias(uint32_t addr)
+{
+    int n;
+
+    /* PP_CNTL, also written at 0x2cc0 by AmigaOS 4.1 and TinyGL */
+    if (addr == 0x1c38) {
+        return 0x2cc0;
+    }
+    if (addr == 0x2cc0) {
+        return 0x1c38;
+    }
+    /*
+     * SE_VPORT_XSCALE to _ZOFFSET: Mesa writes them at 0x1d98, TinyGL at
+     * 0x2098
+     */
+    if (addr >= 0x1d98 && addr <= 0x1dac) {
+        return addr + 0x300;
+    }
+    if (addr >= 0x2098 && addr <= 0x20ac) {
+        return addr - 0x300;
+    }
+    if (addr >= 0x1c54 && addr < 0x1c54 + 3 * 0x18) {
+        n = (addr - 0x1c54) / 0x18;
+        switch ((addr - 0x1c54) % 0x18) {
+        case 0: /* PP_TXFILTER */
+            return 0x2c00 + n * 0x20;
+        case 4: /* PP_TXFORMAT */
+            return 0x2c04 + n * 0x20;
+        case 8: /* PP_TXOFFSET */
+            return 0x2d00 + n * 0x18;
+        }
+        return 0;
+    }
+    if (addr >= 0x1d04 && addr < 0x1d04 + 3 * 8) {
+        n = (addr - 0x1d04) / 8;
+        /* PP_TEX_SIZE and PP_TEX_PITCH */
+        return (addr & 4 ? 0x2c0c : 0x2c10) + n * 0x20;
+    }
+    return 0;
+}
+
+/*
  * A surface register changes: the old surface's memory goes back to the
  * swap outside the surfaces, the new one's takes its own swap.
  */
@@ -1033,6 +1080,14 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     case CNFG_CNTL:
         s->regs.config_cntl = data;
         break;
+    case 0x2200 ... 0x220f: /* SE_TCL_VECTOR/SCALAR_INDX/DATA_REG */
+        if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF && size == 4 &&
+            !(addr & 3)) {
+            s->mmregs[addr / 4] = data;
+            trace_ati_reg_store(addr, data);
+            ati_tcl_write(s, addr, data);
+        }
+        break;
     case SURFACE_CNTL:
         if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
             s->regs.surface_cntl = data;
@@ -1402,8 +1457,14 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     default:
         if (!ati_cp_mm_write(s, addr, data, size) &&
             addr < memory_region_size(&s->mm)) {
+            uint32_t alias;
+
             ati_reg_write_offs(&s->mmregs[addr / 4], addr & 3, data, size);
             trace_ati_reg_store(addr, s->mmregs[addr / 4]);
+            alias = ati_is_r200(s) ? ati_r200_alias(addr) : 0;
+            if (alias) {
+                s->mmregs[alias / 4] = s->mmregs[addr / 4];
+            }
         }
         break;
     }
@@ -1630,6 +1691,7 @@ static void ati_vga_reset(DeviceState *dev)
     s->regs.config_cntl = 0;
     s->regs.surface_cntl = 0;
     ati_cp_reset(s);
+    memset(&s->tcl, 0, sizeof(s->tcl));
 }
 
 static void ati_vga_exit(PCIDevice *dev)
