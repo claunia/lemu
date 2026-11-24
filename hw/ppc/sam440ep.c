@@ -21,8 +21,9 @@
  * controller at 05 and the slots at 06, 07 and 08. The interrupts of all of
  * them go to five UIC inputs: 25, 26, 27, 29 and 50 (UIC1 18).
  *
- * Not modelled yet: the CS4281 sound and the two EMACs; a PCI NIC
- * (rtl8139) stands in for the network. The Radeon is an rv100 for now.
+ * Not modelled yet: the two EMACs; a PCI NIC in slot 07 (a 3c905c, which
+ * AmigaOS 4.1 drives with eth3com.device) stands in for the network. The
+ * Radeon is an rv100 for now.
  */
 
 #include "qemu/osdep.h"
@@ -51,6 +52,7 @@
 #include "hw/ide/pci.h"
 #include "hw/usb/usb.h"
 #include "hw/intc/ppc-uic.h"
+#include "net/net.h"
 
 #define SAM440EP_FIRMWARE   "u-boot-sam440ep.bin"
 
@@ -80,6 +82,7 @@
 #define SAM_DEV_AUDIO       0x0e
 #define SAM_DEV_SATA        0x04    /* behind the bridge */
 #define SAM_DEV_USB         0x05    /* behind the bridge */
+#define SAM_DEV_SLOT1       0x06    /* behind the bridge, slots 06-08 */
 
 /* The five UIC inputs the PCI interrupts go to */
 enum { SAM_IRQ25, SAM_IRQ26, SAM_IRQ27, SAM_IRQ29, SAM_IRQ50, SAM_PCI_IRQS };
@@ -240,8 +243,8 @@ static int sam_bridge_map_irq(PCIDevice *pci_dev, int pin)
         return 0;
     case SAM_DEV_USB:
         return 1;
-    case 6 ... 8:
-        return slots[slot - 6][pin & 3];
+    case SAM_DEV_SLOT1 ... SAM_DEV_SLOT1 + 2:
+        return slots[slot - SAM_DEV_SLOT1][pin & 3];
     default:
         return 1;
     }
@@ -319,6 +322,7 @@ static void sam440ep_init(MachineState *machine)
     CPUPPCState *env;
     PCIBus *pci_bus, *sec_bus;
     PCIDevice *pdev;
+    NICInfo *nd;
     I2CBus *i2c;
     USBBus *usb_bus;
     uint8_t *eeprom, *boot_eeprom;
@@ -485,6 +489,13 @@ static void sam440ep_init(MachineState *machine)
     qdev_prop_set_string(DEVICE(pdev), "model", "rv100");
     pci_realize_and_unref(pdev, pci_bus, &error_fatal);
 
+    /* the CS4281 sound */
+    pdev = pci_new(PCI_DEVFN(SAM_DEV_AUDIO, 0), "cs4281");
+    if (machine->audiodev) {
+        qdev_prop_set_string(DEVICE(pdev), "audiodev", machine->audiodev);
+    }
+    pci_realize_and_unref(pdev, pci_bus, &error_fatal);
+
     /* SATA, behind the bridge */
     if (defaults_enabled()) {
         PCIIDEState *s = PCI_IDE(pci_create_simple(sec_bus,
@@ -514,6 +525,19 @@ static void sam440ep_init(MachineState *machine)
         }
     }
 
+    /*
+     * The first NIC goes in slot 07. Its INTA is IRQ 29, as U-Boot sets it;
+     * slot 06's INTA is IRQ 50 on UIC1, which the AmigaOS 4.1 kernel never
+     * enables. Any more NICs take the free slots.
+     */
+    nd = qemu_find_nic_info(MACHINE_GET_CLASS(machine)->default_nic, true,
+                            NULL);
+    if (nd) {
+        pdev = pci_new(PCI_DEVFN(SAM_DEV_SLOT1 + 1, 0),
+                       nd->model ?: MACHINE_GET_CLASS(machine)->default_nic);
+        qdev_set_nic_properties(DEVICE(pdev), nd);
+        pci_realize_and_unref(pdev, sec_bus, &error_fatal);
+    }
     pci_init_nic_devices(sec_bus, MACHINE_GET_CLASS(machine)->default_nic);
 
     sam440ep_load_firmware(machine);
@@ -527,7 +551,8 @@ static void sam440ep_machine_init(MachineClass *mc)
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("440epb");
     mc->default_ram_size = 512 * MiB;
     mc->default_ram_id = "ppc4xx.sdram";
-    mc->default_nic = "rtl8139";
+    mc->default_nic = "3c905c";
+    machine_add_audiodev_property(mc);
 }
 
 DEFINE_MACHINE("sam440ep", sam440ep_machine_init)

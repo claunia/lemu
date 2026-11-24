@@ -88,8 +88,10 @@ config SAM440EP
     default y
     depends on PPC && FDT
     imply ATI_VGA
+    select CS4281
     select PFLASH_CFI01
     select IDE_SII3112
+    select TC90X
     select M41T80
     select PPC440
     select SERIAL_MM
