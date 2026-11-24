@@ -60,6 +60,9 @@
 #define UBOOT_ENTRY         0xfffffffc
 
 #define PCI_CONFIG_BASE     0xeec00000
+#define SAM_PCI_MEM_BASE    0xa0000000
+#define SAM_PCI_MEM_SIZE    0x40000000
+
 #define INIT_RAM_BASE       0x70000000
 #define INIT_RAM_SIZE       (64 * KiB)
 
@@ -442,13 +445,26 @@ static void sam440ep_init(MachineState *machine)
     create_unimplemented_device("ppc440ep.gpio1", 0xef600c00, 0x100);
 
     /* PCI */
-    pcihost = sysbus_create_varargs(TYPE_PPC4xx_PCI_HOST, PCI_CONFIG_BASE,
-                                    qdev_get_gpio_in(uic[0], 25),
-                                    qdev_get_gpio_in(uic[0], 26),
-                                    qdev_get_gpio_in(uic[0], 27),
-                                    qdev_get_gpio_in(uic[0], 29),
-                                    qdev_get_gpio_in(uic[1], 50 - 32),
-                                    NULL);
+    /*
+     * PCI memory is a space of its own, of which U-Boot maps 1 GB at
+     * 0xa0000000. On the PLB it would put the legacy VGA memory of the
+     * Radeon over RAM at 0xa0000.
+     */
+    pcihost = qdev_new(TYPE_PPC4xx_PCI_HOST);
+    qdev_prop_set_uint32(pcihost, "pci-mem-base", SAM_PCI_MEM_BASE);
+    qdev_prop_set_uint32(pcihost, "pci-mem-size", SAM_PCI_MEM_SIZE);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(pcihost), &error_fatal);
+    sysbus_mmio_map(SYS_BUS_DEVICE(pcihost), 0, PCI_CONFIG_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(pcihost), SAM_IRQ25,
+                       qdev_get_gpio_in(uic[0], 25));
+    sysbus_connect_irq(SYS_BUS_DEVICE(pcihost), SAM_IRQ26,
+                       qdev_get_gpio_in(uic[0], 26));
+    sysbus_connect_irq(SYS_BUS_DEVICE(pcihost), SAM_IRQ27,
+                       qdev_get_gpio_in(uic[0], 27));
+    sysbus_connect_irq(SYS_BUS_DEVICE(pcihost), SAM_IRQ29,
+                       qdev_get_gpio_in(uic[0], 29));
+    sysbus_connect_irq(SYS_BUS_DEVICE(pcihost), SAM_IRQ50,
+                       qdev_get_gpio_in(uic[1], 50 - 32));
     pci_bus = PCI_BUS(qdev_get_child_bus(pcihost, "pci.0"));
     pci_bus_map_irqs(pci_bus, sam_root_map_irq);
 
