@@ -251,6 +251,8 @@ struct SpaprMachineState {
     char *kvm_type;
     char *host_model;
     char *host_serial;
+    bool aix_compat;
+    bool aix_papr;
 
     int32_t irq_map_nr;
     unsigned long *irq_map;
