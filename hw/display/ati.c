@@ -47,6 +47,7 @@ static const struct {
     { "rv100", PCI_DEVICE_ID_ATI_RADEON_QY },
     { "es1000", PCI_DEVICE_ID_ATI_RADEON_ES1000 },
     { "rv250", PCI_DEVICE_ID_ATI_RADEON_LF },
+    { "rv280", PCI_DEVICE_ID_ATI_RADEON_9250 },
 };
 
 enum { VGA_MODE, EXT_MODE };
@@ -1566,9 +1567,10 @@ static void ati_vga_realize(PCIDevice *dev, Error **errp)
     if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
         s->dev_id != PCI_DEVICE_ID_ATI_RADEON_QY &&
         s->dev_id != PCI_DEVICE_ID_ATI_RADEON_ES1000 &&
-        s->dev_id != PCI_DEVICE_ID_ATI_RADEON_LF) {
-        error_setg(errp, "Unknown ATI VGA device id, "
-                   "only 0x5046, 0x5159, 0x515e and 0x4c66 are supported");
+        s->dev_id != PCI_DEVICE_ID_ATI_RADEON_LF &&
+        s->dev_id != PCI_DEVICE_ID_ATI_RADEON_9250) {
+        error_setg(errp, "Unknown ATI VGA device id, only 0x5046, 0x5159, "
+                   "0x515e, 0x4c66 and 0x5960 are supported");
         return;
     }
     pci_set_word(dev->config + PCI_DEVICE_ID, s->dev_id);

@@ -426,7 +426,7 @@ static void tcl_vectors(Ctx *t, int addr, const float *v, int n)
  * the projection), a 64 x 64 viewport, the colour out of combiner stage
  * 0 straight from the diffuse colour.
  */
-static void tcl_start(Ctx *t)
+static void tcl_start(Ctx *t, const char *model)
 {
     static const float ident[16] = {
         1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
@@ -435,7 +435,7 @@ static void tcl_start(Ctx *t)
     static uint32_t black[W * W];
     int i;
 
-    start_model(t, "rv250");
+    start_model(t, model);
     /* black, written directly: the R200 reads vertices differently */
     for (i = 0; i < W * W; i++) {
         black[i] = cpu_to_le32(BLACK);
@@ -491,7 +491,7 @@ static void tcl_tri(Ctx *t, const float pos[3][4], const float *attr, int n)
 }
 
 /* clip space to the viewport, and the perspective divide by w */
-static void test_tcl_transform(void)
+static void test_tcl_transform(const void *model)
 {
     /* the second triangle is the first one at w = 2: half the size */
     static const float pos[3][4] = {
@@ -504,7 +504,7 @@ static void test_tcl_transform(void)
     static const float blue[12] = { 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1 };
     Ctx t;
 
-    tcl_start(&t);
+    tcl_start(&t, model);
     reg(&t, R200_SE_VTX_FMT_0, R200_VTX_Z0 | R200_VTX_W0 | R200_VTX_FP_RGBA0);
     reg(&t, R200_SE_VTX_FMT_1, 0);
     tcl_tri(&t, pos, green, 4);
@@ -518,7 +518,7 @@ static void test_tcl_transform(void)
 }
 
 /* a directional light straight onto a red material */
-static void test_tcl_light(void)
+static void test_tcl_light(const void *model)
 {
     static const float pos[3][4] = {
         { -1, -1, 0, 1 }, { 1, -1, 0, 1 }, { -1, 1, 0, 1 }
@@ -530,7 +530,7 @@ static void test_tcl_light(void)
     static const float zero[4] = { 0, 0, 0, 0 };
     Ctx t;
 
-    tcl_start(&t);
+    tcl_start(&t, model);
     reg(&t, R200_SE_VTX_FMT_0, R200_VTX_Z0 | R200_VTX_W0 | R200_VTX_N0);
     reg(&t, R200_SE_VTX_FMT_1, 0);
     reg(&t, R200_TCL_LIGHT_MODEL_CTL_0, 1);      /* lighting on */
@@ -560,7 +560,12 @@ int main(int argc, char **argv)
     qtest_add_func("/ati-3d/mipmap", test_mipmap);
     qtest_add_func("/ati-3d/surface-swap", test_surface_swap);
     qtest_add_func("/ati-3d/color-order", test_color_order);
-    qtest_add_func("/ati-3d/tcl-transform", test_tcl_transform);
-    qtest_add_func("/ati-3d/tcl-light", test_tcl_light);
+    /* the Mobility 9000 (M9) and the Radeon 9250 */
+    qtest_add_data_func("/ati-3d/rv250/tcl-transform", "rv250",
+                        test_tcl_transform);
+    qtest_add_data_func("/ati-3d/rv250/tcl-light", "rv250", test_tcl_light);
+    qtest_add_data_func("/ati-3d/rv280/tcl-transform", "rv280",
+                        test_tcl_transform);
+    qtest_add_data_func("/ati-3d/rv280/tcl-light", "rv280", test_tcl_light);
     return g_test_run();
 }
