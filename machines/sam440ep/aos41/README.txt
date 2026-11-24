@@ -1,4 +1,4 @@
-AmigaOS 4.1 on QEMU's ACube Sam440ep (PowerPC 440EP, 512 MB, Radeon, SiI3114 SATA, USB keyboard and mouse, 3Com 3C905C Ethernet, CS4281 sound)
+AmigaOS 4.1 on QEMU's ACube Sam440ep (PowerPC 440EP, 512 MB, Radeon, SiI3114 SATA, USB keyboard and mouse, on-chip EMAC Ethernet, CS4281 sound)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 The Sam440ep starts U-Boot (fw/u-boot-sam440ep.bin, built from source), which runs the Radeon's VGA BIOS (fw/vgabios-ati.bin), shows its boot menu and boots the disk after 5 seconds. In about a minute the Workbench comes up at 1024x768.
@@ -6,7 +6,7 @@ Click in the QEMU window to grab the mouse; Ctrl-Alt-G (Ctrl-Option-G on a Mac) 
 Extra QEMU options are passed through, e.g. ./run.sh -display vnc=127.0.0.1:1.
 The terminal holds the QEMU monitor. quit there stops QEMU at once.
 CD-ROM: in the monitor, change cd0 file.iso.
-Network is QEMU user mode NAT. The interface ETH3COM (eth3com.device) gets its address by DHCP; ping 10.0.2.2 reaches the host side. The card sits in PCI slot 07: AmigaOS 4.1 never enables the interrupt of slot 06.
+Network is QEMU user mode NAT. The interface EMAC0 (ppc440ep_eth.device, the 440EP's first EMAC) gets its address by DHCP; ping 10.0.2.2 reaches the host side. U-Boot saves the MAC addresses in its environment at each start, where AmigaOS reads them. A 3Com 3C905C instead: add -nic user,model=3c905c and use SYS:Storage/NetInterfaces/ETH3COM.
 Sound: AHI with cs4281.audio, unit 0 set to the CS4281 HiFi 16 bit stereo mode. Prefs/AHI plays a test sound.
 The disk writes are slow: the file system flushes the disk after almost every write, so copying many files (an install) takes a long time.
 Shut down: close the window or type quit in the terminal when the disk is idle.

@@ -2,8 +2,8 @@
 # Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 # AmigaOS 4.1 on an ACube Sam440ep (sam440ep): PowerPC 440EP, 512 MB RAM,
-# Radeon, SiI3114 SATA, USB keyboard and mouse, CS4281 sound and a 3Com
-# 3C905C network card in PCI slot 07.
+# Radeon, SiI3114 SATA, USB keyboard and mouse, CS4281 sound and the 440EP's
+# on-chip Ethernet (EMAC).
 cd "$(dirname "$0")" || exit 1
 case "$(uname -s)-$(uname -m)" in
 Darwin-arm64) q=bin/macos-arm64/qemu-system-ppc ;;

@@ -3,7 +3,7 @@
 <!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
 
 **TL;DR** `aos41/run.sh` boots AmigaOS 4.1 on `-M sam440ep` from a U-Boot
-built from source. Graphics (Radeon, 2D and CP), network (3Com 3C905C)
+built from source. Graphics (Radeon, 2D and CP), network (the on-chip EMAC)
 and sound (CS4281, playback) work.
 
 ## Kit
@@ -33,10 +33,11 @@ and sound (CS4281, playback) work.
 | SATA | SiI3114 behind the PCI-PCI bridge | `sii3114ide.device` |
 | USB | `isp1561-ohci`, with a USB keyboard and mouse | `ohci.usbhcd` |
 | Graphics | `ati-vga,model=rv100` at 0c, 2D and CP (the real board has a Radeon Mobility M9) | `ATIRadeon.chip` |
-| Ethernet | `3c905c` in PCI slot 07 (the two on-chip EMACs are not modelled) | `eth3com.device` |
+| Ethernet | the two on-chip EMACs (`ppc4xx-emac`) through the MAL and the ZMII bridge, PHYs at 24 and 25 | `ppc440ep_eth.device` |
+| Ethernet, optional | `3c905c` in PCI slot 07 (`-nic ...,model=3c905c`) | `eth3com.device` |
 | Sound | `cs4281` at 0e, with an ALC655 codec | `cs4281.audio` (AHI) |
 
-The NIC must not go in slot 06: U-Boot gives that slot IRQ 50 (UIC1 input
+A PCI NIC must not go in slot 06: U-Boot gives that slot IRQ 50 (UIC1 input
 18), and the AmigaOS 4.1 kernel never enables any UIC1 input. Slot 07 is
 IRQ 29 on UIC0. A `-nic` or `-device` with no slot still lands in 07.
 
@@ -52,8 +53,9 @@ rebuilds the binary in the AmigaOne's Docker image:
 The patch runs the Radeon's own VGA BIOS instead of ATI's M9 BIOS, fixes
 the x86 emulator's PCI config data port and stack, sets VESA mode 0x111,
 accepts a read delay calibration where every setting works, counts down
-the boot menu (`menuboot_delay=5`) and stops USB before the kickstart is
-loaded, unless it comes from USB.
+the boot menu (`menuboot_delay=5`), stops USB before the kickstart is
+loaded, unless it comes from USB, and sets `ethaddr` and `eth1addr` from
+the boot EEPROM and saves the environment when they are not set.
 
 ## AmigaOS notes
 
@@ -65,8 +67,15 @@ loaded, unless it comes from USB.
   completed.
 - The Internet wizard: its radio buttons did not take clicks here; the
   keyboard shortcuts work (`t` Ethernet, `m` Manual).
-- The network interface is `DEVS:NetInterfaces/ETH3COM`:
-  `device=eth3com.device`, `configure=dhcp`.
+- The network interface is `DEVS:NetInterfaces/EMAC0`:
+  `device=ppc440ep_eth.device`, `unit=0`, `configure=dhcp`. The one for
+  the 3C905C is in `SYS:Storage/NetInterfaces/ETH3COM`.
+- `ppc440ep_eth.device` reads its MAC address from `ethaddr` (`eth1addr`
+  for unit 1) in the U-Boot environment saved in the EEPROM at 0x54-0x57,
+  not from U-Boot's copy in RAM, and gives up without one. The board puts
+  the EMACs' addresses in bytes 0xf0-0xfb of the boot EEPROM at 0x53; our
+  U-Boot sets `ethaddr` and `eth1addr` from them and saves the environment
+  when they are missing.
 - Sound: choose the CS4281 HiFi 16 bit stereo mode for unit 0 in
   Prefs/AHI.
 - The Radeon driver writes its CP packets to the CSQ PIO aperture in the
