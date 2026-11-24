@@ -70,6 +70,7 @@ blobs = [
   'u-boot.e500',
   'u-boot-sam460.bin',
   'u-boot-amigaone.bin',
+  'u-boot-sam440ep.bin',
   'qemu_vga.ndrv',
   'edk2-licenses.txt',
   'hppa-firmware.img',
