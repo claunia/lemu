@@ -147,99 +147,31 @@ int ati_vram_xm(ATIVGAState *s, uint32_t off)
 }
 
 /*
- * Reorders the bytes of the dwords in [lo, hi] from the order of swap
- * 'from' to that of swap 'to'. Whole dwords are always reordered.
+ * The CPU sees [lo, hi] with another swap: reorder the bytes of its dwords
+ * from the order of swap 'from' to that of swap 'to'.
  */
-static void ati_vram_permute(ATIVGAState *s, uint32_t lo, uint32_t hi,
-                             int mask)
-{
-    uint32_t *p, *end, v;
-
-    lo &= ~3;
-    if (!mask || lo >= s->vga.vram_size || hi < lo) {
-        return;
-    }
-    hi = MIN(hi | 3, s->vga.vram_size - 1);
-    p = (uint32_t *)(s->vga.vram_ptr + lo);
-    end = (uint32_t *)(s->vga.vram_ptr + hi + 1);
-    /* the same on hosts of either byte order */
-    switch (mask) {
-    case 1: /* the bytes of each 16 bit word */
-        for (; p < end; p++) {
-            v = *p;
-            *p = ((v & 0x00ff00ffu) << 8) | ((v >> 8) & 0x00ff00ffu);
-        }
-        break;
-    case 2: /* the 16 bit words */
-        for (; p < end; p++) {
-            v = *p;
-            *p = (v << 16) | (v >> 16);
-        }
-        break;
-    default: /* all four bytes */
-        for (; p < end; p++) {
-            *p = bswap32(*p);
-        }
-        break;
-    }
-}
-
-/* the CPU sees [lo, hi] with another swap: reorder it */
 static void ati_vram_reswap(ATIVGAState *s, uint32_t lo, uint32_t hi,
                             int from, int to)
 {
-    if (from == to || lo >= s->vga.vram_size) {
+    int mask = from ^ to;
+    uint8_t *p, t[4];
+    uint32_t a;
+    int i;
+
+    lo &= ~3;
+    hi |= 3;
+    if (!mask || lo >= s->vga.vram_size) {
         return;
     }
-    ati_vram_permute(s, lo, hi, from ^ to);
-    hi = MIN(hi | 3, s->vga.vram_size - 1);
-    memory_region_set_dirty(&s->vga.vram, lo & ~3, hi + 1 - (lo & ~3));
-}
-
-/*
- * The swap outside the surfaces changes: reorder all the video memory
- * that no surface covers. Drivers flip it around every texture upload
- * (W3D_Radeon writes 32 bit texels with the 32 bit swap on a 16 bit
- * screen), so the display is not redrawn for it: the memory is back in
- * its old order once the swap is.
- */
-static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
-{
-    uint32_t lo[ATI_SURFACES], hi[ATI_SURFACES];
-    uint32_t start = 0, end;
-    int n, i, k = 0, xm;
-
-    if (from == to) {
-        return;
+    hi = MIN(hi, s->vga.vram_size - 1);
+    for (a = lo; a < hi; a += 4) {
+        p = s->vga.vram_ptr + a;
+        for (i = 0; i < 4; i++) {
+            t[i] = p[i ^ mask];
+        }
+        memcpy(p, t, 4);
     }
-    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
-        for (n = 0; n < ATI_SURFACES; n++) {
-            if (ati_surface(s, n, &lo[k], &hi[k], &xm)) {
-                k++;
-            }
-        }
-    }
-    while (start < s->vga.vram_size) {
-        /* skip the surfaces that cover start */
-        for (i = 0; i < k; i++) {
-            if ((lo[i] & ~3) <= start && hi[i] >= start) {
-                start = (hi[i] | 3) + 1;
-                i = -1;
-            }
-        }
-        if (start >= s->vga.vram_size) {
-            break;
-        }
-        /* reorder up to the next surface */
-        end = s->vga.vram_size;
-        for (i = 0; i < k; i++) {
-            if ((lo[i] & ~3) > start) {
-                end = MIN(end, lo[i] & ~3);
-            }
-        }
-        ati_vram_permute(s, start, end - 1, from ^ to);
-        start = end;
-    }
+    memory_region_set_dirty(&s->vga.vram, lo, hi + 1 - lo);
 }
 
 static inline void ati_reg_write_offs(uint32_t *reg, int offs,
@@ -257,7 +189,6 @@ static void ati_surface_write(ATIVGAState *s, hwaddr addr, uint64_t data,
     uint32_t lo, hi;
     int xm;
 
-    trace_ati_reg_store(addr, data);
     if (ati_surface(s, n, &lo, &hi, &xm)) {
         ati_vram_reswap(s, lo, hi, xm, nxm);
     }
@@ -1099,20 +1030,12 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         vga_ioport_write(&s->vga, VGA_PEL_D, (data >> 12) & 0xff);
         vga_ioport_write(&s->vga, VGA_PEL_D, (data >> 2) & 0xff);
         break;
-    case CNFG_CNTL: {
-        int xm = ati_nonsurf_xm(s);
-
+    case CNFG_CNTL:
         s->regs.config_cntl = data;
-        ati_nonsurf_reswap(s, xm, ati_nonsurf_xm(s));
         break;
-    }
     case SURFACE_CNTL:
         if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
-            int xm = ati_nonsurf_xm(s);
-
-            trace_ati_reg_store(addr, data);
             s->regs.surface_cntl = data;
-            ati_nonsurf_reswap(s, xm, ati_nonsurf_xm(s));
             if (s->mode == EXT_MODE) {
                 s->vga.big_endian_fb = ati_big_endian_fb(s);
             }
