@@ -2,8 +2,8 @@
 
 `-M pseries` runs AIX 5.3, 6.1, 7.1, 7.2 and 7.3 as a logical partition
 under TCG. Each system with a ready-to-run tarball has a folder here with
-its `run.sh`, `run.cmd` and `README.txt`: `aix53`, `aix61`, `aix71` and
-`aix72`. AIX 7.3 has no tarball yet.
+its `run.sh`, `run.cmd` and `README.txt`: `aix53`, `aix61`, `aix71`,
+`aix72` and `aix73`.
 
 AIX 5.3 needs device-tree fixes that `aix53/run.sh` gives SLOF as nvramrc
 Forth, and it runs CDE on an ATI ES1000 with a USB keyboard and mouse.
@@ -60,6 +60,6 @@ the kernel banner.
 `build-windows.sh OUT` (Docker), and `build-macos.sh OUT` (Homebrew glib,
 pixman, libslirp, sdl2-compat, sdl3, dylibbundler) build self-contained
 qemu-system-ppc64 binaries into OUT, then
-`mkrelease.sh aix53|aix61|aix71|aix72 VMDIR OUT NAME.tar.lz` packs them with
-the VM's disk (`aix53.qcow2`, `aix61.qcow2`, `aix71.qcow2` or
+`mkrelease.sh aix53|aix61|aix71|aix72|aix73 VMDIR OUT NAME.tar.lz` packs them with
+the VM's disk (`aix53.qcow2`, `aix61.qcow2`, `aix71.qcow2`, `aix73.qcow2` or
 `hdisk0.qcow2`) and the SLOF firmware.
