@@ -74,6 +74,130 @@ static bool ati_big_endian_fb(ATIVGAState *s)
                                    NONSURF_AP1_SWP_32BPP);
 }
 
+/*
+ * Byte swapping of the frame buffer apertures. QEMU keeps the video memory
+ * as the CPU sees it through the apertures, while the engines see it little
+ * endian; the swap is a byte address mask within each dword: 1 swaps the
+ * bytes of each 16 bit word, 3 those of each 32 bit word. The swap of
+ * aperture 0 counts, or that of aperture 1 if 0 does not swap.
+ */
+static int ati_swp_xm(uint32_t v)
+{
+    if (v & (NONSURF_AP0_SWP_32BPP | NONSURF_AP0_SWP_16BPP)) {
+        return v & NONSURF_AP0_SWP_32BPP ? 3 : 1;
+    }
+    if (v & (NONSURF_AP1_SWP_32BPP | NONSURF_AP1_SWP_16BPP)) {
+        return v & NONSURF_AP1_SWP_32BPP ? 3 : 1;
+    }
+    return 0;
+}
+
+/* the swap outside the surfaces */
+static int ati_nonsurf_xm(ATIVGAState *s)
+{
+    int xm = ati_swp_xm(s->regs.surface_cntl);
+    int ap;
+
+    for (ap = 0; !xm && ap < 2; ap++) {
+        switch ((s->regs.config_cntl >> (ap * 2)) & 3) {
+        case 1:
+            xm = 1;
+            break;
+        case 2:
+            xm = 3;
+            break;
+        }
+    }
+    return xm;
+}
+
+/*
+ * Surface n covers [*lo, *hi] of the video memory with its own swap
+ * (SURFACE_INFO uses the bits of SURFACE_CNTL); the bounds are GPU
+ * addresses. A surface with its upper bound below its lower one is off.
+ */
+static bool ati_surface(ATIVGAState *s, int n, uint32_t *lo, uint32_t *hi,
+                        int *xm)
+{
+    uint32_t base = SURFACE0_LOWER_BOUND + n * 0x10;
+    uint32_t lower = s->mmregs[base / 4];
+    uint32_t upper = s->mmregs[(base + 4) / 4];
+
+    if (upper <= lower || !ati_gpu_vram_offset(s, lower, lo)) {
+        return false;
+    }
+    *hi = MIN(*lo + (upper - lower), s->vga.vram_size - 1);
+    *xm = ati_swp_xm(s->mmregs[(base + 8) / 4]);
+    return true;
+}
+
+int ati_vram_xm(ATIVGAState *s, uint32_t off)
+{
+    uint32_t lo, hi;
+    int n, xm;
+
+    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+        for (n = 0; n < ATI_SURFACES; n++) {
+            if (ati_surface(s, n, &lo, &hi, &xm) && off >= lo && off <= hi) {
+                return xm;
+            }
+        }
+    }
+    return ati_nonsurf_xm(s);
+}
+
+/*
+ * The CPU sees [lo, hi] with another swap: reorder the bytes of its dwords
+ * from the order of swap 'from' to that of swap 'to'.
+ */
+static void ati_vram_reswap(ATIVGAState *s, uint32_t lo, uint32_t hi,
+                            int from, int to)
+{
+    int mask = from ^ to;
+    uint8_t *p, t[4];
+    uint32_t a;
+    int i;
+
+    lo &= ~3;
+    hi |= 3;
+    if (!mask || lo >= s->vga.vram_size) {
+        return;
+    }
+    hi = MIN(hi, s->vga.vram_size - 1);
+    for (a = lo; a < hi; a += 4) {
+        p = s->vga.vram_ptr + a;
+        for (i = 0; i < 4; i++) {
+            t[i] = p[i ^ mask];
+        }
+        memcpy(p, t, 4);
+    }
+    memory_region_set_dirty(&s->vga.vram, lo, hi + 1 - lo);
+}
+
+static inline void ati_reg_write_offs(uint32_t *reg, int offs,
+                                      uint64_t data, unsigned int size);
+
+/*
+ * A surface register changes: the old surface's memory goes back to the
+ * swap outside the surfaces, the new one's takes its own swap.
+ */
+static void ati_surface_write(ATIVGAState *s, hwaddr addr, uint64_t data,
+                              unsigned int size)
+{
+    int n = (addr - SURFACE0_LOWER_BOUND) / 0x10;
+    int nxm = ati_nonsurf_xm(s);
+    uint32_t lo, hi;
+    int xm;
+
+    if (ati_surface(s, n, &lo, &hi, &xm)) {
+        ati_vram_reswap(s, lo, hi, xm, nxm);
+    }
+    ati_reg_write_offs(&s->mmregs[addr / 4], addr & 3, data, size);
+    if (ati_surface(s, n, &lo, &hi, &xm)) {
+        ati_vram_reswap(s, lo, hi, nxm, xm);
+    }
+}
+
 static void ati_vga_switch_mode(ATIVGAState *s)
 {
     DPRINTF("%d -> %d\n",
@@ -1269,10 +1393,17 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
             s->host_data.next = 0;
         }
         break;
+    case SURFACE0_LOWER_BOUND ... SURFACE0_LOWER_BOUND + ATI_SURFACES * 0x10 - 1:
+        if ((addr & 0xf) && s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+            ati_surface_write(s, addr, data, size);
+            break;
+        }
+        /* fall through */
     default:
         if (!ati_cp_mm_write(s, addr, data, size) &&
             addr < memory_region_size(&s->mm)) {
             ati_reg_write_offs(&s->mmregs[addr / 4], addr & 3, data, size);
+            trace_ati_reg_store(addr, s->mmregs[addr / 4]);
         }
         break;
     }

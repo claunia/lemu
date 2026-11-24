@@ -9,6 +9,8 @@
  *
  * and linux/include/video/radeon.h
  *
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+ *
  * This work is licensed under the GNU GPL license version 2.
  */
 
@@ -167,6 +169,7 @@
 #define CAP0_TRIG_CNTL                          0x0950
 #define CAP1_TRIG_CNTL                          0x09c0
 #define SURFACE_CNTL                            0x0b00
+#define SURFACE0_LOWER_BOUND                    0x0b04
 
 #define RBBM_STATUS                             0x0e40
 

@@ -152,6 +152,7 @@ ati_mm_write(unsigned int size, uint64_t addr, const char *name, uint64_t val) "
 ati_2d_blt(uint32_t rop, int bpp, uint32_t offset, int x, int y, int w, int h, int cw, int ch) "rop 0x%02x bpp %d dst 0x%x (%d,%d) %dx%d clip %dx%d"
 
 # ati_3d.c
+ati_reg_store(uint32_t addr, uint32_t val) "0x%04x <- 0x%08x"
 ati_3d_draw(int prim, int count, uint32_t fmt, bool tex) "prim %d vertices %d format 0x%x texture %d"
 
 # ati_cp.c

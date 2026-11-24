@@ -192,7 +192,10 @@ static inline bool ati_is_r200(ATIVGAState *s)
 const char *ati_reg_name(int num);
 void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size);
 
+#define ATI_SURFACES 8
+
 uint32_t ati_fb_offset(ATIVGAState *s, uint32_t gpu_addr);
+int ati_vram_xm(ATIVGAState *s, uint32_t off);
 bool ati_gpu_vram_offset(ATIVGAState *s, uint32_t gpu_addr, uint32_t *off);
 void ati_3d_packet(ATIVGAState *s, uint8_t op, const uint32_t *d, uint32_t n);
 bool ati_gpu_rw(ATIVGAState *s, uint32_t addr, void *buf, uint32_t len,
