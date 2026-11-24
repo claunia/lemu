@@ -3,8 +3,8 @@
 <!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
 
 **TL;DR** `morphos/run.sh` boots MorphOS 3.21 on `-M pegasos2` through
-QEMU's Virtual Open Firmware. Graphics (Radeon 7000 in the AGP slot, 2D, 3D
-and command processor), network (on-board VIA Rhine-II) and sound (VIA
+QEMU's Virtual Open Firmware. Graphics (an R200 Radeon in the AGP slot, 2D,
+3D with transform and lighting, and command processor), network (on-board VIA Rhine-II) and sound (VIA
 AC97) work.
 
 ## Kit
@@ -34,7 +34,7 @@ the root of the MorphOS 3.21 CD.
 | CPU | MPC7457 (G4) | |
 | North bridge | Marvell MV64361 | |
 | South bridge | VIA VT8231: IDE, USB, PS/2, serial | `ide.device` |
-| Graphics | `ati-vga,model=rv100` (Radeon 7000) in the AGP slot, PCI unit 0 of the MV64361 | Radeon, through the CP's PIO path |
+| Graphics | `ati-vga,model=rv250,vgamem_mb=64` (R200, 64 MB) in the AGP slot, PCI unit 0 of the MV64361 | Radeon, through the CP's PIO path; TinyGL `r200.library` |
 | Ethernet | `via-rhine` (VT6102) at 0d, on board | `via_rhinepci.device` (`eth1`) |
 | Sound | `via-ac97` of the VT8231 | `pegasos.audio` (AHI) |
 
@@ -56,11 +56,12 @@ AGP card runs as a PCI one there.
   until something about it is changed. NetStack only gets the interfaces
   that the prefs write; `ENV:sys/Interfaces` by hand and `NetConfig` do not
   add one to a running NetStack.
-- 3D through TinyGL needs an R200: with `-device
-  ati-vga,model=rv250,vgamem_mb=64,romfile=,bus=pci.0` instead of the
-  Radeon 7000, TinyGL's `r200.library` draws the 3D screen blankers
-  (Atlantis, Gears, BlockTube, GLMatrix and the others) through the
-  R200's transform and lighting. TinyGL has no driver for the R100.
+- 3D goes through TinyGL, which needs an R200: its `r200.library` draws
+  the 3D screen blankers (Atlantis, Gears, BlockTube, GLMatrix and the
+  others) through the R200's transform and lighting. The kit has an
+  `rv250` for that. TinyGL has no driver for the R100: with
+  `model=rv100` (the Radeon 7000) the desktop works, but the 3D blankers
+  stay greyed out.
 - AHI's speaker picture in Prefs/Audio is not a test button; `C:Play` plays
   a sample.
 - Install: First Flight, Installation, New Installation, automatic

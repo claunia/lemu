@@ -2,8 +2,9 @@
 # Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
 # MorphOS 3.21 on a Genesi/bPlan Pegasos II (pegasos2): MPC7457 G4, 1 GB RAM,
-# Radeon 7000 in the AGP slot, on-board VIA Rhine-II Ethernet and VIA AC97
-# sound.
+# a 64 MB R200 Radeon in the AGP slot, on-board VIA Rhine-II Ethernet and
+# VIA AC97 sound. The R200 (rather than the Radeon 7000, model=rv100) is
+# what TinyGL needs for 3D.
 cd "$(dirname "$0")" || exit 1
 case "$(uname -s)-$(uname -m)" in
 Darwin-arm64) q=bin/macos-arm64/qemu-system-ppc ;;
@@ -22,7 +23,7 @@ exec "$q" \
  -name "MorphOS 3.21 G4 PEGASOS2" \
  -M pegasos2 -m 1024 \
  -kernel boot.img \
- -vga none -device ati-vga,model=rv100,romfile=,bus=pci.0 \
+ -vga none -device ati-vga,model=rv250,vgamem_mb=64,romfile=,bus=pci.0 \
  -drive file=morphos.qcow2,if=ide,index=0,format=qcow2 \
  -drive if=ide,index=2,media=cdrom,id=cd0 \
  -nic user,model=via-rhine \
