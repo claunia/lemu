@@ -42,6 +42,9 @@
 #include "system/device_tree.h"
 #include "hw/ppc/vof.h"
 #include "exec/cpu-common.h"
+#include "hw/block/flash.h"
+#include "system/block-backend.h"
+#include "system/blockdev.h"
 
 #include <libfdt.h>
 
@@ -205,6 +208,24 @@ static void pegasos_init(MachineState *machine)
     }
     memory_region_add_subregion(get_system_memory(), 0, machine->ram);
 
+    /*
+     * The Pegasos II firmware is in an AMD Am29F040 flash, which also
+     * keeps SmartFirmware's NVRAM: with -drive if=pflash the flash is
+     * that image and the NVRAM is kept in it.
+     */
+    if (pm->type == PEGASOS2 && drive_get(IF_PFLASH, 0, 0)) {
+        if (machine->firmware) {
+            error_report("Give the firmware either as -bios or as the "
+                         "pflash drive, not both");
+            exit(1);
+        }
+        pflash_cfi02_register(PROM_ADDR, "pegasos2.flash", PROM_SIZE,
+                              blk_by_legacy_dinfo(drive_get(IF_PFLASH, 0, 0)),
+                              64 * KiB, 1, 1, 0x01, 0xa4, 0, 0,
+                              0x5555, 0x2aaa, 1);
+        goto north_bridge;
+    }
+
     /* allocate and load firmware */
     filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, fwname);
     if (!filename) {
@@ -240,6 +261,7 @@ static void pegasos_init(MachineState *machine)
         }
     }
 
+north_bridge:
     /* north bridge */
     switch (pm->type) {
     case PEGASOS1:

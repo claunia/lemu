@@ -101,6 +101,12 @@ The ROM image can be extracted from it with the following command:
 
   $ tail -c +85581 up050404 | head -c 524288 > pegasos2.rom
 
+With ``-bios`` the firmware is in ROM and forgets its NVRAM settings at
+each reset. Given as ``-drive if=pflash,file=pegasos2.rom,format=raw``
+instead, the image is the board's flash, an AMD Am29F040, and the
+firmware keeps its NVRAM in it, so ``setenv`` settings such as
+``auto-boot?`` stay.
+
 Running Linux
 -------------
 

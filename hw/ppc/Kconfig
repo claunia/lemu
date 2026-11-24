@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
+
 config PSERIES
     bool
     default y
@@ -120,6 +122,7 @@ config PEGASOS
     select SMBUS_EEPROM
     select VOF
     select VIA_RHINE
+    select PFLASH_CFI02
 
 config PREP
     bool
