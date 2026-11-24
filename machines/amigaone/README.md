@@ -32,7 +32,7 @@ built from source. Graphics (Radeon 7000), network (3Com 3C920) and sound
 | CPU | MPC7457 (G4) | |
 | North bridge | Articia S | |
 | South bridge | VIA 82C686B: IDE, USB, PS/2, serial | `a1ide.device`, `uhci.usbhcd` |
-| Graphics | `ati-vga,model=rv100` (Radeon 7000), 2D and CP | `ATIRadeon.chip` |
+| Graphics | `ati-vga,model=rv100,vgamem_mb=64` (Radeon 7000, 64 MB), 2D, CP and 3D | `ATIRadeon.chip`, `W3D_Radeon.library` |
 | Ethernet | `3c905c` in slot 6, the on-board 3C920 | `eth3com.device` |
 | Sound | `via-ac97` of the 686B | `via-ac97.audio` (AHI) |
 
@@ -76,6 +76,13 @@ Things that were wrong and are fixed in the patch:
 
 ## AmigaOS notes
 
+- Warp3D works: GLQuake and Quake III Arena (both from Aminet) run. Give
+  the Radeon 64 MB as `run.sh` does. With the 16 MB default,
+  `W3D_Radeon` moves textures in and out of video memory every frame and
+  some come out as noise.
+- GLQuake needs `AmigaInput.library`, which the 4.0 CD lacks; copy it
+  from the 4.1 CD to `LIBS:`. Without it, 4.0's `lowlevel.library`
+  crashes when the game starts.
 - The installer does not copy the AC97 driver, even when "VIA686B
   onboard" is chosen: copy `Contrib/AHI/VIA-AC97/via-ac97.audio` to
   `DEVS:AHI/` and `VIA-AC97` to `DEVS:AudioModes/`.
