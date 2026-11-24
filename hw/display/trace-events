@@ -156,6 +156,7 @@ ati_2d_blt(uint32_t rop, int bpp, uint32_t offset, int x, int y, int w, int h, i
 # ati_3d.c
 ati_reg_store(uint32_t addr, uint32_t val) "0x%04x <- 0x%08x"
 ati_3d_draw(int prim, int count, uint32_t fmt, bool tex) "prim %d vertices %d format 0x%x texture %d"
+ati_3d_texture(int unit, uint32_t offset, uint32_t fmt, uint32_t filter, int xm) "unit %d offset 0x%08x format 0x%08x filter 0x%08x swap %d"
 ati_3d_vertex(int x, int y, uint32_t fmt, uint32_t vf, int r, int g, int b, int a) "(%d,%d) format 0x%x vf 0x%x rgba %d %d %d %d"
 
 # ati_cp.c

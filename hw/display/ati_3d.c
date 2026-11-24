@@ -681,6 +681,7 @@ static bool ati_tex_setup(ATI3DCtx *c, int n)
         t->xm = ati_vram_xm(s, start);
         t->copy = NULL;
         t->enabled = true;
+        trace_ati_3d_texture(n, offset, fmt, filter, t->xm);
         return true;
     }
     t->copy = g_try_malloc(size);
@@ -691,6 +692,7 @@ static bool ati_tex_setup(ATI3DCtx *c, int n)
     t->data = t->copy;
     t->xm = 0;
     t->enabled = true;
+    trace_ati_3d_texture(n, offset, fmt, filter, -1);
     return true;
 }
 
@@ -905,8 +907,8 @@ static float r200_comb_out(uint32_t ctl, uint32_t ctl2, const float *a,
     float r;
 
     switch (R200_TX_OP(ctl)) {
-    case 3: /* lerp */
-        r = va * vb + (1.0f - va) * vc;
+    case 3: /* lerp from A to B by C, as Mesa's r200 maps GL_INTERPOLATE */
+        r = va * (1.0f - vc) + vb * vc;
         break;
     default: /* multiply and add */
         r = va * vb + vc;
