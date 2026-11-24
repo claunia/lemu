@@ -1280,13 +1280,31 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
 /*
  * With APER_REG_ENDIAN set the register aperture swaps the bytes of each
  * 32-bit word, so a big endian host can use plain loads and stores (the
- * AIX X server does).
+ * AIX X server does). The command queue apertures are not swapped: their
+ * data goes to the CP as it is, in the little endian order of a ring
+ * buffer in memory, which is how the AmigaOS 4.1 Radeon driver writes its
+ * PIO packets there.
  */
+static bool ati_mm_aper_swapped(ATIVGAState *s, hwaddr addr)
+{
+    if (!(s->regs.config_cntl & APER_REG_ENDIAN)) {
+        return false;
+    }
+    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
+        ((addr >= RADEON_CP_CSQ_APER_PRIMARY &&
+          addr < RADEON_CP_CSQ_APER_PRIMARY + 0x200) ||
+         (addr >= RADEON_CP_CSQ_APER_INDIRECT &&
+          addr < RADEON_CP_CSQ_APER_INDIRECT + 0x100))) {
+        return false;
+    }
+    return true;
+}
+
 static uint64_t ati_mm_aper_read(void *opaque, hwaddr addr, unsigned int size)
 {
     ATIVGAState *s = opaque;
 
-    if (!(s->regs.config_cntl & APER_REG_ENDIAN)) {
+    if (!ati_mm_aper_swapped(s, addr)) {
         return ati_mm_read(s, addr, size);
     }
     switch (size) {
@@ -1304,7 +1322,7 @@ static void ati_mm_aper_write(void *opaque, hwaddr addr,
 {
     ATIVGAState *s = opaque;
 
-    if (!(s->regs.config_cntl & APER_REG_ENDIAN)) {
+    if (!ati_mm_aper_swapped(s, addr)) {
         ati_mm_write(s, addr, data, size);
         return;
     }
