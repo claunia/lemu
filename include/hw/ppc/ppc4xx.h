@@ -73,6 +73,7 @@ struct Ppc4xxMalState {
     void **rx_notify_opaque;
     uint8_t  txcnum;
     uint8_t  rxcnum;
+    uint8_t  rx_group;      /* receive channels per EMAC, 0: one */
 };
 
 /*
@@ -95,6 +96,7 @@ void ppc4xx_mal_set_rx_notify(Ppc4xxMalState *mal, int chan,
 /* the 10/100 EMAC (ppc4xx_emac.c) and the ZMII bridge in front of them */
 #define TYPE_PPC4XX_EMAC "ppc4xx-emac"
 #define TYPE_PPC4XX_ZMII "ppc4xx-zmii"
+#define TYPE_PPC4XX_RGMII "ppc4xx-rgmii"
 
 /* Peripheral local bus arbitrer */
 #define TYPE_PPC4xx_PLB "ppc4xx-plb"

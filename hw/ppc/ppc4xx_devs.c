@@ -85,6 +85,19 @@ static uint32_t mal_chan_bit(int chan)
     return 0x80000000u >> chan;
 }
 
+/*
+ * The 460EX's MAL gives each EMAC a group of receive channels (8 for EMAC1);
+ * the first channel of a group has the group's bit in RXCASR and the status
+ * registers.
+ */
+static uint32_t mal_rx_bit(Ppc4xxMalState *mal, int chan)
+{
+    if (mal->rx_group && !(chan % mal->rx_group)) {
+        return mal_chan_bit(chan / mal->rx_group);
+    }
+    return mal_chan_bit(chan);
+}
+
 /* irqs: TXEOB, RXEOB, TXDE, RXDE */
 static void ppc4xx_mal_update_irq(Ppc4xxMalState *mal)
 {
@@ -182,7 +195,7 @@ bool ppc4xx_mal_can_receive(Ppc4xxMalState *mal, int chan)
     uint32_t buf;
     uint16_t ctrl, len;
 
-    if (chan >= mal->rxcnum || !(mal->rxcasr & mal_chan_bit(chan)) ||
+    if (chan >= mal->rxcnum || !(mal->rxcasr & mal_rx_bit(mal, chan)) ||
         !mal->rcbs[chan]) {
         return false;
     }
@@ -207,7 +220,7 @@ bool ppc4xx_mal_receive(Ppc4xxMalState *mal, int chan, const uint8_t *data,
         mal_desc_read(desc, &ctrl, &len, &buf);
         if (!(ctrl & MAL_RX_EMPTY)) {
             /* out of descriptors in the middle of a frame */
-            mal->rxdeir |= mal_chan_bit(chan);
+            mal->rxdeir |= mal_rx_bit(mal, chan);
             break;
         }
         chunk = MIN(bufsize, size - done);
@@ -223,7 +236,7 @@ bool ppc4xx_mal_receive(Ppc4xxMalState *mal, int chan, const uint8_t *data,
         }
         mal_desc_write(desc, ctrl, chunk);
         if (ctrl & MAL_INTR) {
-            mal->rxeobisr |= mal_chan_bit(chan);
+            mal->rxeobisr |= mal_rx_bit(mal, chan);
         }
         mal->rxcur[chan] = mal_next(desc, ctrl, mal->rxctpr[chan]);
     }
@@ -328,13 +341,13 @@ static void dcr_write_mal(void *opaque, int dcrn, uint32_t val)
         break;
     case MAL0_RXCASR:
         for (i = 0; i < mal->rxcnum; i++) {
-            if (val & ~mal->rxcasr & mal_chan_bit(i)) {
+            if (val & ~mal->rxcasr & mal_rx_bit(mal, i)) {
                 mal->rxcur[i] = mal->rxctpr[i];
             }
         }
         mal->rxcasr |= val & 0xC0000000;
         for (i = 0; i < mal->rxcnum; i++) {
-            if (val & mal_chan_bit(i)) {
+            if (val & mal_rx_bit(mal, i)) {
                 mal_rx_notify(mal, i);
             }
         }
@@ -350,7 +363,7 @@ static void dcr_write_mal(void *opaque, int dcrn, uint32_t val)
         /* Read/clear */
         mal->rxdeir &= ~val;
         for (i = 0; i < mal->rxcnum; i++) {
-            if (val & mal_chan_bit(i)) {
+            if (val & mal_rx_bit(mal, i)) {
                 mal_rx_notify(mal, i);
             }
         }
@@ -435,6 +448,7 @@ static void ppc4xx_mal_finalize(Object *obj)
 static const Property ppc4xx_mal_properties[] = {
     DEFINE_PROP_UINT8("txc-num", Ppc4xxMalState, txcnum, 0),
     DEFINE_PROP_UINT8("rxc-num", Ppc4xxMalState, rxcnum, 0),
+    DEFINE_PROP_UINT8("rx-group", Ppc4xxMalState, rx_group, 0),
 };
 
 static void ppc4xx_mal_class_init(ObjectClass *oc, const void *data)
