@@ -84,6 +84,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(ViaRhineState, VIA_RHINE)
 /* MIICR */
 #define MIICR_WCMD              BIT(5)
 #define MIICR_RCMD              BIT(6)
+#define MIICR_MAUTO             BIT(7)
+
+/* MIIADR */
+#define MIIADR_MDONE            BIT(5)
+#define MIIADR_MIDLE            BIT(7)
 
 /* EECSR */
 #define EECSR_EDO               BIT(0)
@@ -410,6 +415,18 @@ static uint64_t rhine_read(void *opaque, hwaddr addr, unsigned size)
         s->regs[R_EECSR] = (s->regs[R_EECSR] & ~EECSR_EDO) |
                            (eeprom93xx_read(s->eeprom) ? EECSR_EDO : 0);
     }
+    if (addr <= R_MIIADR && addr + size > R_MIIADR) {
+        /*
+         * With auto polling off the management port is idle. With it on,
+         * a polling cycle of the PHY is always just done.
+         */
+        if (s->regs[R_MIICR] & MIICR_MAUTO) {
+            s->regs[R_MIIADR] = (s->regs[R_MIIADR] & ~MIIADR_MIDLE) |
+                                MIIADR_MDONE;
+        } else {
+            s->regs[R_MIIADR] |= MIIADR_MIDLE;
+        }
+    }
     val = ldn_le_p(&s->regs[addr], size);
     trace_via_rhine_read(addr, size, val);
     return val;
@@ -465,6 +482,9 @@ static void rhine_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
             break;
         case R_MIICR:
             rhine_mii(s, b);
+            break;
+        case R_MIIADR:
+            s->regs[a] = b & ~MIIADR_MIDLE;
             break;
         case R_MIISR:
             s->regs[a] = (s->regs[a] & 0x03) | (b & ~0x83);
