@@ -126,6 +126,14 @@ AGP card runs as a PCI one there.
   upper bound of 0xffffffff, and flips `SURFACE_CNTL` between the 16 and
   32 bit swaps and none to read and write screen pixels; `ati-vga` follows
   both (see `hw/display/ati.c`).
-- The clock: `battclock.resource` finds no battery-backed clock, and the
-  date starts at 1978. Neither the firmware nor AmigaOS touches the
-  VT8231's RTC here.
+- The clock: `battclock.resource` 53.1 of the Final Edition looks for the
+  clock chip in the VIA 686 (1106:0686) or the ATI SB600 (1002:438d) only,
+  never in the Pegasos II's VT8231 (1106:8231), so the date starts at 1978,
+  on a real board too. The VT8231 has the same MC146818 at ports 0x70 and
+  0x71, so the kit's `SYS:Kickstart/battclock.resource.kmod` is patched to
+  look for 1106:8231 instead of 1106:0686, one instruction at file offset
+  0x13c (`li r9,0x686` becomes `ori r9,r11,0x8231`; r11 is 0 there):
+
+      printf '\x61\x69\x82\x31' | dd of=battclock.resource.kmod bs=1 seek=316 conv=notrunc
+
+  `run.sh` gives `-rtc base=localtime`, as AmigaOS keeps local time.

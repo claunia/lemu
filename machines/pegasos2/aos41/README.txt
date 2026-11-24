@@ -12,7 +12,7 @@ Sound: AHI with via-ac97.audio, VIA-AC97:HiFi 16 bit stereo++ (Prefs/AHI, Play a
 Graphics: ATIRadeon.chip, with the AmigaOS 4.1 compositing; Warp3D through W3D_R200.
 Firmware prompt: Esc on the serial port in that second stops at the "ok" prompt. boot hd:0 amigaboot.of boots AmigaOS from there; setenv and printenv change and show the NVRAM, which flash.bin keeps.
 Shut down: AmigaOS has no shutdown; close QEMU once the disk is quiet. Its "reboot" closes QEMU too.
-Known: the clock starts at 1978, as AmigaOS finds no battery-backed clock here.
+Clock: the VT8231's battery-backed clock starts at the host's local time. The kit's SYS:Kickstart/battclock.resource.kmod is patched to find it: the 4.1 Final Edition one only looks for the VIA 686 and the ATI SB600, so on a real Pegasos II too the date starts at 1978.
 AmigaOS 4.1 is not free software: see hyperion-entertainment.com for its license. SmartFirmware is (c) CodeGen and bPlan, from bPlan's Pegasos II firmware update.
 macOS: if the binary is blocked, run xattr -cr . in this folder.
 
