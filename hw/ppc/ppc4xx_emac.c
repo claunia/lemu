@@ -120,14 +120,14 @@ struct Ppc4xxEmacState {
 
 /*
  * The Marvell PHY of the EMAC4 interrupts through its own pin: reg 18
- * enables, reg 19 latches the events and clears when read. Half a second
+ * enables, reg 19 latches the events and clears when read. 2.5 seconds
  * after a reset or restart negotiation is done, which latches "negotiation
  * done, link, speed and duplex changed"; drivers set the PHY up in between.
  */
 #define MV_IEN          18
 #define MV_ISR          19
 #define MV_INT_LINK     0x6c00
-#define MV_NEG_MS       500
+#define MV_NEG_MS       2500
 
 static void emac_phy_update_irq(Ppc4xxEmacState *s)
 {

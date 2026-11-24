@@ -433,9 +433,9 @@ static void sam460ex_init(MachineState *machine)
         sysbus_mmio_map(sbdev, 0, 0x4ef600e00 + i * 0x100);
         sysbus_connect_irq(sbdev, 0, qdev_get_gpio_in(uic[2], 16 + i));
     }
-    /* the PHY's interrupt: MorphOS enables UIC3 input 20, level, low */
+    /* the PHY's interrupt: UIC0 input 9, level, low, as MorphOS sets it */
     qdev_connect_gpio_out_named(emac[0], "phy-irq", 0,
-                                qdev_get_gpio_in(uic[3], 20));
+                                qdev_get_gpio_in(uic[0], 9));
 
     /* DMA */
     ppc4xx_dma_init(env, 0x200);
