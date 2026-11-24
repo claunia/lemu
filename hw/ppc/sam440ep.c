@@ -23,7 +23,9 @@
  *
  * The two on-chip EMACs work through the MAL and are the default NICs
  * (ppc440ep_eth.device); a 3c905c (eth3com.device) goes in PCI slot 07.
- * The Radeon is an rv100 for now.
+ * The Radeon is an rv250 (PCI 1002:4c66), the M9's ID, which ACube's U-Boot
+ * looks for; AmigaOS composites windows, menus and the AmiDock with its
+ * R200 3D engine.
  */
 
 #include "qemu/osdep.h"
@@ -488,7 +490,7 @@ static void sam440ep_init(MachineState *machine)
 
     /* the Radeon Mobility M9 */
     pdev = pci_new(PCI_DEVFN(SAM_DEV_RADEON, 0), "ati-vga");
-    qdev_prop_set_string(DEVICE(pdev), "model", "rv100");
+    qdev_prop_set_string(DEVICE(pdev), "model", "rv250");
     pci_realize_and_unref(pdev, pci_bus, &error_fatal);
 
     /* the CS4281 sound */

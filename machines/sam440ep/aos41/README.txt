@@ -1,4 +1,4 @@
-AmigaOS 4.1 on QEMU's ACube Sam440ep (PowerPC 440EP, 512 MB, Radeon, SiI3114 SATA, USB keyboard and mouse, on-chip EMAC Ethernet, CS4281 sound)
+AmigaOS 4.1 on QEMU's ACube Sam440ep (PowerPC 440EP, 512 MB, Radeon Mobility M9, SiI3114 SATA, USB keyboard and mouse, on-chip EMAC Ethernet, CS4281 sound)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 The Sam440ep starts U-Boot (fw/u-boot-sam440ep.bin, built from source), which runs the Radeon's VGA BIOS (fw/vgabios-ati.bin), shows its boot menu and boots the disk after 5 seconds. In about a minute the Workbench comes up at 1024x768.

@@ -33,6 +33,8 @@
 #define PCI_DEVICE_ID_ATI_RADEON_QY 0x5159
 /* Radeon ES1000 (RN50), a server RV100 with one CRTC */
 #define PCI_DEVICE_ID_ATI_RADEON_ES1000 0x515e
+/* Mobility Radeon 9000 (M9), an RV250, on the Sam440ep */
+#define PCI_DEVICE_ID_ATI_RADEON_LF 0x4c66
 
 #define ATI_RAGE128_LINEAR_APER_SIZE (64 * MiB)
 #define ATI_R100_LINEAR_APER_SIZE (128 * MiB)
@@ -180,6 +182,12 @@ struct ATIVGAState {
     ATICPState cp;
     uint32_t *mmregs;   /* registers that are only stored */
 };
+
+/* the R200 family: the Mobility M9 */
+static inline bool ati_is_r200(ATIVGAState *s)
+{
+    return s->dev_id == PCI_DEVICE_ID_ATI_RADEON_LF;
+}
 
 const char *ati_reg_name(int num);
 void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size);

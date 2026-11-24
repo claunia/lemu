@@ -3,8 +3,9 @@
 <!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
 
 **TL;DR** `aos41/run.sh` boots AmigaOS 4.1 on `-M sam440ep` from a U-Boot
-built from source. Graphics (Radeon, 2D and CP), network (the on-chip EMAC)
-and sound (CS4281, playback) work.
+built from source. Graphics (Radeon Mobility M9, 2D, CP and the 3D that
+compositing uses), network (the on-chip EMAC) and sound (CS4281, playback)
+work.
 
 ## Kit
 
@@ -32,7 +33,7 @@ and sound (CS4281, playback) work.
 | CPU | PowerPC 440EP | |
 | SATA | SiI3114 behind the PCI-PCI bridge | `sii3114ide.device` |
 | USB | `isp1561-ohci`, with a USB keyboard and mouse | `ohci.usbhcd` |
-| Graphics | `ati-vga,model=rv100` at 0c, 2D and CP (the real board has a Radeon Mobility M9) | `ATIRadeon.chip` |
+| Graphics | `ati-vga,model=rv250` at 0c (1002:4c66, the Mobility M9), 2D, CP and an R200 3D subset | `ATIRadeon.chip` |
 | Ethernet | the two on-chip EMACs (`ppc4xx-emac`) through the MAL and the ZMII bridge, PHYs at 24 and 25 | `ppc440ep_eth.device` |
 | Ethernet, optional | `3c905c` in PCI slot 07 (`-nic ...,model=3c905c`) | `eth3com.device` |
 | Sound | `cs4281` at 0e, with an ALC655 codec | `cs4281.audio` (AHI) |
@@ -81,3 +82,8 @@ the boot EEPROM and saves the environment when they are not set.
 - The Radeon driver writes its CP packets to the CSQ PIO aperture in the
   chip's byte order, so `ati-vga` does not byte-swap that aperture even
   when the register aperture is big-endian.
+- On the M9, AmigaOS draws the AmiDock, the pop-up menus and the
+  compositing of windows with the R200 3D engine: two textures, the
+  register combiners and blending. It writes the texture and stage enables
+  to 0x2cc0 and gives texture coordinates in texels (`SE_VTE_CNTL` bit 12).
+  With an `rv100` the screen works but the AmiDock never shows.

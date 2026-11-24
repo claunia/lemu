@@ -1,6 +1,6 @@
 /*
  * QEMU ATI SVGA emulation
- * Radeon R100 3D engine (rasterizer subset)
+ * Radeon R100 and R200 3D engine (rasterizer subset)
  *
  * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
@@ -13,6 +13,10 @@
  * triangles, strips, fans, rectangles and quads, with gouraud colour, up to
  * two textures, the R100 texture combiners, alpha test and alpha blending.
  * MorphOS draws its anti-aliased text and translucent parts this way.
+ * The R200 (the Mobility M9 of the Sam440ep) has the same rasterizer,
+ * texture formats and blending, but its own vertex format registers,
+ * texture unit registers and register combiners; AmigaOS 4.1 composites
+ * its windows and the AmiDock with them.
  * There is no depth or stencil buffer, no fog and no mipmapping yet.
  */
 
@@ -49,6 +53,45 @@
 #define R3D_VPORT_YOFFSET       0x1da4
 #define R3D_RE_TOP_LEFT         0x26c0
 #define R3D_SE_VTX_FMT          0x2080
+
+/* R200 */
+#define R200_PP_CNTL_ALT        0x2cc0
+#define R200_SE_VTE_CNTL        0x20b0
+#define R200_VTX_ST_DENORM      BIT(12)
+#define R200_SE_VTX_FMT_0       0x2088
+#define R200_SE_VTX_FMT_1       0x208c
+#define R200_PP_TXFILTER(n)     (0x2c00 + (n) * 0x20)
+#define R200_PP_TXFORMAT(n)     (0x2c04 + (n) * 0x20)
+#define R200_PP_TXSIZE(n)       (0x2c0c + (n) * 0x20)
+#define R200_PP_TXPITCH(n)      (0x2c10 + (n) * 0x20)
+#define R200_PP_TXOFFSET(n)     (0x2d00 + (n) * 0x18)
+#define R200_PP_TFACTOR(n)      (0x2ee0 + (n) * 4)
+#define R200_PP_TXCBLEND(n)     (0x2f00 + (n) * 0x10)
+#define R200_PP_TXCBLEND2(n)    (0x2f04 + (n) * 0x10)
+#define R200_PP_TXABLEND(n)     (0x2f08 + (n) * 0x10)
+#define R200_PP_TXABLEND2(n)    (0x2f0c + (n) * 0x10)
+
+/* R200 SE_VTX_FMT_0 */
+#define R200_VTX_Z0             BIT(0)
+#define R200_VTX_W0             BIT(1)
+#define R200_VTX_WEIGHTS(f)     (((f) >> 2) & 7)
+#define R200_VTX_N0             BIT(6)
+#define R200_VTX_POINT_SIZE     BIT(7)
+#define R200_VTX_DISCRETE_FOG   BIT(8)
+#define R200_VTX_SHININESS_0    BIT(9)
+#define R200_VTX_SHININESS_1    BIT(10)
+#define R200_VTX_COLOR(f, n)    (((f) >> (11 + (n) * 2)) & 3)
+
+/* R200 combiner arguments and controls */
+#define R200_TX_COMP(i)         BIT(16 + (i) * 4)
+#define R200_TX_BIAS(i)         BIT(17 + (i) * 4)
+#define R200_TX_SCALE(i)        BIT(18 + (i) * 4)
+#define R200_TX_NEG(i)          BIT(19 + (i) * 4)
+#define R200_TX_OP(v)           (((v) >> 28) & 7)
+#define R200_TX2_SCALE(v)       (((v) >> 8) & 7)
+#define R200_TX2_CLAMP(v)       (((v) >> 12) & 3)
+#define R200_TX2_OUTPUT_REG(v)  (((v) >> 16) & 7)
+#define R200_TX2_REPL(v, i)     (((v) >> (26 + (i) * 2)) & 3)
 
 /* PP_CNTL */
 #define PP_TEX_ENABLE(n)        BIT(4 + (n))
@@ -96,7 +139,8 @@
 #define TXF_HEIGHT_LOG2(f)      (((f) >> 12) & 0xf)
 
 #define ATI_3D_MAX_VERTS        0x4000
-#define ATI_3D_UNITS            2
+#define ATI_3D_UNITS            6       /* R200; the R100 uses two */
+#define R100_UNITS              2
 
 typedef struct ATIVertex {
     float x, y, w;
@@ -117,6 +161,7 @@ typedef struct ATITexture {
     bool linear;
     int clamp_s, clamp_t;
     bool nonparam;
+    int route;                  /* the texture coordinates it uses */
 } ATITexture;
 
 typedef struct ATI3DCtx {
@@ -134,6 +179,8 @@ typedef struct ATI3DCtx {
     uint32_t pp_cntl;
     uint32_t pp_misc;
     bool ogl_center;
+    bool r200;
+    int units;
     ATITexture tex[ATI_3D_UNITS];
     uint32_t dirty_lo, dirty_hi;
 } ATI3DCtx;
@@ -352,13 +399,16 @@ static int ati_tex_bypp(int fmt)
     }
 }
 
+/* the texture registers have the same layout on R100 and R200 */
 static bool ati_tex_setup(ATI3DCtx *c, int n)
 {
     ATIVGAState *s = c->s;
     ATITexture *t = &c->tex[n];
-    uint32_t fmt = r3d(s, R3D_PP_TXFORMAT(n));
-    uint32_t filter = r3d(s, R3D_PP_TXFILTER(n));
-    uint32_t offset = r3d(s, R3D_PP_TXOFFSET(n));
+    uint32_t fmt = r3d(s, c->r200 ? R200_PP_TXFORMAT(n) : R3D_PP_TXFORMAT(n));
+    uint32_t filter = r3d(s, c->r200 ? R200_PP_TXFILTER(n) :
+                                       R3D_PP_TXFILTER(n));
+    uint32_t offset = r3d(s, c->r200 ? R200_PP_TXOFFSET(n) :
+                                       R3D_PP_TXOFFSET(n));
     uint32_t addr = offset & ~0x1f;
     uint32_t size;
     uint32_t start;
@@ -366,12 +416,15 @@ static bool ati_tex_setup(ATI3DCtx *c, int n)
     t->fmt = TXF_FORMAT(fmt);
     t->alpha_in_map = fmt & TXF_ALPHA_IN_MAP;
     t->bypp = ati_tex_bypp(t->fmt);
+    t->route = c->r200 ? MIN((fmt >> 24) & 7, ATI_3D_UNITS - 1) : n;
     if (fmt & TXF_NON_POWER2) {
-        uint32_t sz = r3d(s, R3D_PP_TEX_SIZE(n));
+        uint32_t sz = r3d(s, c->r200 ? R200_PP_TXSIZE(n) : R3D_PP_TEX_SIZE(n));
+        uint32_t pitch = r3d(s, c->r200 ? R200_PP_TXPITCH(n) :
+                                          R3D_PP_TEX_PITCH(n));
 
         t->w = (sz & 0x7ff) + 1;
         t->h = ((sz >> 16) & 0x7ff) + 1;
-        t->pitch = (r3d(s, R3D_PP_TEX_PITCH(n)) & 0x3fe0) + 32;
+        t->pitch = (pitch & 0x3fe0) + 32;
     } else {
         t->w = 1 << TXF_WIDTH_LOG2(fmt);
         t->h = 1 << TXF_HEIGHT_LOG2(fmt);
@@ -383,7 +436,9 @@ static bool ati_tex_setup(ATI3DCtx *c, int n)
     t->clamp_t = (filter >> 27) & 7;
     t->clamp_s = t->clamp_s == 0 ? 0 : t->clamp_s == 1 ? 1 : 2;
     t->clamp_t = t->clamp_t == 0 ? 0 : t->clamp_t == 1 ? 1 : 2;
-    t->nonparam = r3d(s, R3D_SE_COORD_FMT) & BIT(8 + n);
+    /* R200: SE_VTE_CNTL says texture coordinates are in texels */
+    t->nonparam = c->r200 ? !!(r3d(s, R200_SE_VTE_CNTL) & R200_VTX_ST_DENORM) :
+                            !!(r3d(s, R3D_SE_COORD_FMT) & BIT(8 + n));
     size = t->pitch * t->h;
 
     /* textures in video memory are read in place, others are copied */
@@ -527,6 +582,138 @@ static void ati_combine(ATI3DCtx *c, int n, float cur[4], const float dif[4],
     }
     res[3] = ati_comb_op(ab, aa, ba, ca);
     memcpy(cur, res, sizeof(res));
+}
+
+/* R200 register combiners: the textures are in R0-R5, R0 is the result */
+
+static void r200_comb_arg(int arg, int repl, bool alpha_stage, float r[][4],
+                          const float dif[4], const float tf[4],
+                          const float tf1[4], float out[4])
+{
+    const float *src;
+
+    switch (arg) {
+    case 2:
+    case 3:
+        src = r[0];
+        break;
+    case 4:
+    case 5:
+        src = dif;
+        break;
+    case 8:
+    case 9:
+        src = tf;
+        break;
+    case 10 ... 21:
+        src = r[(arg - 10) / 2];
+        break;
+    case 26:
+    case 27:
+        src = tf1;
+        break;
+    default:
+        out[0] = out[1] = out[2] = out[3] = 0.0f;
+        return;
+    }
+    if (alpha_stage) {
+        /* even arguments are alpha, odd ones blue */
+        out[3] = src[arg & 1 ? 2 : 3];
+        return;
+    }
+    if (arg & 1) {
+        out[0] = out[1] = out[2] = src[3];
+    } else if (repl) {
+        out[0] = out[1] = out[2] = src[repl - 1];
+    } else {
+        memcpy(out, src, 3 * sizeof(float));
+    }
+}
+
+static float r200_comb_mod(uint32_t ctl, int i, float v)
+{
+    if (ctl & R200_TX_COMP(i)) {
+        v = 1.0f - v;
+    }
+    if (ctl & R200_TX_BIAS(i)) {
+        v -= 0.5f;
+    }
+    if (ctl & R200_TX_SCALE(i)) {
+        v *= 2.0f;
+    }
+    if (ctl & R200_TX_NEG(i)) {
+        v = -v;
+    }
+    return v;
+}
+
+static float r200_comb_out(uint32_t ctl, uint32_t ctl2, const float *a,
+                           const float *b, const float *cc)
+{
+    static const float scale[8] = {
+        1.0f, 2.0f, 4.0f, 8.0f, 1.0f, 0.5f, 0.25f, 0.125f
+    };
+    float va = r200_comb_mod(ctl, 0, *a);
+    float vb = r200_comb_mod(ctl, 1, *b);
+    float vc = r200_comb_mod(ctl, 2, *cc);
+    float r;
+
+    switch (R200_TX_OP(ctl)) {
+    case 3: /* lerp */
+        r = va * vb + (1.0f - va) * vc;
+        break;
+    default: /* multiply and add */
+        r = va * vb + vc;
+        break;
+    }
+    r *= scale[R200_TX2_SCALE(ctl2)];
+    return R200_TX2_CLAMP(ctl2) == 1 ? clampf(r) : r;
+}
+
+static void r200_combine(ATI3DCtx *c, int n, float r[][4], const float dif[4])
+{
+    ATIVGAState *s = c->s;
+    uint32_t cb = r3d(s, R200_PP_TXCBLEND(n));
+    uint32_t cb2 = r3d(s, R200_PP_TXCBLEND2(n));
+    uint32_t ab = r3d(s, R200_PP_TXABLEND(n));
+    uint32_t ab2 = r3d(s, R200_PP_TXABLEND2(n));
+    float tf[4], tf1[4], arg[3][4], res[4];
+    uint32_t tfv;
+    int i, k, reg;
+
+    tfv = r3d(s, R200_PP_TFACTOR(cb2 & 7));
+    tf[0] = ((tfv >> 16) & 0xff) / 255.0f;
+    tf[1] = ((tfv >> 8) & 0xff) / 255.0f;
+    tf[2] = (tfv & 0xff) / 255.0f;
+    tf[3] = (tfv >> 24) / 255.0f;
+    tfv = r3d(s, R200_PP_TFACTOR((cb2 >> 4) & 7));
+    tf1[0] = ((tfv >> 16) & 0xff) / 255.0f;
+    tf1[1] = ((tfv >> 8) & 0xff) / 255.0f;
+    tf1[2] = (tfv & 0xff) / 255.0f;
+    tf1[3] = (tfv >> 24) / 255.0f;
+
+    for (k = 0; k < 3; k++) {
+        r200_comb_arg((cb >> (k * 5)) & 0x1f, R200_TX2_REPL(cb2, k), false,
+                      r, dif, tf, tf1, arg[k]);
+    }
+    for (i = 0; i < 3; i++) {
+        res[i] = r200_comb_out(cb, cb2, &arg[0][i], &arg[1][i], &arg[2][i]);
+    }
+    for (k = 0; k < 3; k++) {
+        r200_comb_arg((ab >> (k * 5)) & 0x1f, 0, true, r, dif, tf, tf1,
+                      arg[k]);
+    }
+    res[3] = r200_comb_out(ab, ab2, &arg[0][3], &arg[1][3], &arg[2][3]);
+
+    /* the colour and the alpha each go to the register they name */
+    reg = R200_TX2_OUTPUT_REG(cb2);
+    if (reg && reg <= ATI_3D_UNITS && ((cb2 >> 20) & 7) != 7) {
+        memcpy(r[reg - 1], res, 3 * sizeof(float));
+    }
+    reg = R200_TX2_OUTPUT_REG(ab2);
+    if (reg && reg <= ATI_3D_UNITS) {
+        r[reg - 1][3] = res[3];
+    }
 }
 
 /* Frame buffer blending and output */
@@ -688,19 +875,39 @@ static void ati_shade(ATI3DCtx *c, int x, int y, const ATIVertex *v)
     int n;
 
     memcpy(cur, v->c, sizeof(cur));
-    for (n = 0; n < ATI_3D_UNITS; n++) {
+    for (n = 0; n < c->units; n++) {
         if (c->tex[n].enabled) {
-            float q = v->tc[n][2] ? v->tc[n][2] : 1.0f;
+            const float *tc = v->tc[c->tex[n].route];
+            float q = tc[2] ? tc[2] : 1.0f;
 
-            ati_tex_sample(c, &c->tex[n], v->tc[n][0] / q, v->tc[n][1] / q,
-                           tx[n]);
+            ati_tex_sample(c, &c->tex[n], tc[0] / q, tc[1] / q, tx[n]);
         } else {
             tx[n][0] = tx[n][1] = tx[n][2] = tx[n][3] = 0.0f;
         }
     }
-    for (n = 0; n < ATI_3D_UNITS; n++) {
-        if (c->pp_cntl & PP_TEX_BLEND_ENABLE(n)) {
-            ati_combine(c, n, cur, v->c, tx);
+    if (c->r200) {
+        /*
+         * The stages work on the registers; R0 starts as texture 0. With
+         * no stage, the diffuse colour goes through.
+         */
+        bool staged = false;
+
+        for (n = 0; n < c->units; n++) {
+            if (c->pp_cntl & PP_TEX_BLEND_ENABLE(n)) {
+                r200_combine(c, n, tx, v->c);
+                staged = true;
+            }
+        }
+        if (staged) {
+            for (n = 0; n < 4; n++) {
+                cur[n] = clampf(tx[0][n]);
+            }
+        }
+    } else {
+        for (n = 0; n < c->units; n++) {
+            if (c->pp_cntl & PP_TEX_BLEND_ENABLE(n)) {
+                ati_combine(c, n, cur, v->c, tx);
+            }
         }
     }
     ati_put_fragment(c, x, y, cur);
@@ -956,6 +1163,96 @@ static void ati_vtx_parse(ATIVGAState *s, uint32_t fmt, uint32_t vf,
     v->w = 1.0f / v->w;
 }
 
+/* R200 vertices: SE_VTX_FMT_0 and SE_VTX_FMT_1 */
+static int r200_vtx_dwords(uint32_t fmt0, uint32_t fmt1)
+{
+    static const int color[4] = { 0, 1, 3, 4 };
+    int n = 2, i;
+
+    n += !!(fmt0 & R200_VTX_Z0) + !!(fmt0 & R200_VTX_W0);
+    n += R200_VTX_WEIGHTS(fmt0);
+    n += fmt0 & R200_VTX_N0 ? 3 : 0;
+    n += !!(fmt0 & R200_VTX_POINT_SIZE) + !!(fmt0 & R200_VTX_DISCRETE_FOG);
+    n += !!(fmt0 & R200_VTX_SHININESS_0) + !!(fmt0 & R200_VTX_SHININESS_1);
+    for (i = 0; i < 8; i++) {
+        n += color[R200_VTX_COLOR(fmt0, i)];
+    }
+    for (i = 0; i < 6; i++) {
+        n += (fmt1 >> (i * 3)) & 7;
+    }
+    return n;
+}
+
+static void r200_vtx_parse(uint32_t fmt0, uint32_t fmt1, uint32_t vf,
+                           const uint32_t *d, ATIVertex *v)
+{
+    int i = 0, n, k;
+
+    memset(v, 0, sizeof(*v));
+    v->x = u2f(d[i++]);
+    v->y = u2f(d[i++]);
+    if (fmt0 & R200_VTX_Z0) {
+        i++;
+    }
+    v->w = 1.0f;
+    if (fmt0 & R200_VTX_W0) {
+        v->w = u2f(d[i++]);
+        if (!v->w) {
+            v->w = 1.0f;
+        }
+    }
+    i += R200_VTX_WEIGHTS(fmt0);
+    i += fmt0 & R200_VTX_N0 ? 3 : 0;
+    i += !!(fmt0 & R200_VTX_POINT_SIZE) + !!(fmt0 & R200_VTX_DISCRETE_FOG);
+    i += !!(fmt0 & R200_VTX_SHININESS_0) + !!(fmt0 & R200_VTX_SHININESS_1);
+    v->c[0] = v->c[1] = v->c[2] = v->c[3] = 1.0f;
+    for (n = 0; n < 8; n++) {
+        switch (R200_VTX_COLOR(fmt0, n)) {
+        case 1: { /* packed */
+            uint32_t p = d[i++];
+
+            if (n) {
+                break;
+            }
+            if (vf & VF_COLOR_ORDER_RGBA) {
+                v->c[0] = (p >> 24) / 255.0f;
+                v->c[1] = ((p >> 16) & 0xff) / 255.0f;
+                v->c[2] = ((p >> 8) & 0xff) / 255.0f;
+                v->c[3] = (p & 0xff) / 255.0f;
+            } else {
+                v->c[3] = (p >> 24) / 255.0f;
+                v->c[0] = ((p >> 16) & 0xff) / 255.0f;
+                v->c[1] = ((p >> 8) & 0xff) / 255.0f;
+                v->c[2] = (p & 0xff) / 255.0f;
+            }
+            break;
+        }
+        case 2: /* float RGB */
+        case 3: /* float RGBA */
+            for (k = 0; k < (R200_VTX_COLOR(fmt0, n) == 3 ? 4 : 3); k++) {
+                float f = u2f(d[i++]);
+
+                if (!n) {
+                    v->c[k] = f;
+                }
+            }
+            break;
+        }
+    }
+    for (n = 0; n < 6; n++) {
+        int cnt = (fmt1 >> (n * 3)) & 7;
+
+        for (k = 0; k < cnt; k++) {
+            float f = u2f(d[i++]);
+
+            if (k < 3) {
+                v->tc[n][k] = f;
+            }
+        }
+    }
+    v->w = 1.0f / v->w;
+}
+
 static bool ati_3d_setup(ATIVGAState *s, ATI3DCtx *c)
 {
     uint32_t top_left = r3d(s, R3D_RE_TOP_LEFT);
@@ -965,6 +1262,8 @@ static bool ati_3d_setup(ATIVGAState *s, ATI3DCtx *c)
 
     memset(c, 0, sizeof(*c));
     c->s = s;
+    c->r200 = ati_is_r200(s);
+    c->units = c->r200 ? ATI_3D_UNITS : R100_UNITS;
     c->rb3d_cntl = r3d(s, R3D_CNTL);
     c->cb_fmt = RB_COLOR_FORMAT(c->rb3d_cntl);
     switch (c->cb_fmt) {
@@ -995,10 +1294,17 @@ static bool ati_3d_setup(ATIVGAState *s, ATI3DCtx *c)
     c->blendcntl = r3d(s, R3D_BLENDCNTL);
     c->planemask = r3d(s, R3D_PLANEMASK);
     c->pp_cntl = r3d(s, R3D_PP_CNTL);
+    if (c->r200) {
+        /*
+         * AmigaOS's R200 driver writes the texture and stage enables, in
+         * the layout of PP_CNTL, to 0x2cc0 and leaves PP_CNTL at 0.
+         */
+        c->pp_cntl |= r3d(s, R200_PP_CNTL_ALT);
+    }
     c->pp_misc = r3d(s, R3D_PP_MISC);
     c->ogl_center = r3d(s, R3D_SE_CNTL) & SE_PIX_CENTER_OGL;
     c->dirty_lo = UINT32_MAX;
-    for (n = 0; n < ATI_3D_UNITS; n++) {
+    for (n = 0; n < c->units; n++) {
         if (c->pp_cntl & PP_TEX_ENABLE(n)) {
             ati_tex_setup(c, n);
         }
@@ -1019,13 +1325,18 @@ static void ati_3d_finish(ATI3DCtx *c)
     }
 }
 
-/* Draws the vertices of one packet; fmt and vf as SE_VTX_FMT, SE_VF_CNTL */
+/*
+ * Draws the vertices of one packet; fmt and vf as SE_VTX_FMT (SE_VTX_FMT_0
+ * on R200) and SE_VF_CNTL
+ */
 static void ati_3d_draw_vertices(ATIVGAState *s, uint32_t fmt, uint32_t vf,
                                  const uint32_t *d, uint32_t n)
 {
     ATI3DCtx c;
     ATIVertex *v;
-    int size = ati_vtx_dwords(fmt);
+    bool r200 = ati_is_r200(s);
+    uint32_t fmt1 = r3d(s, R200_SE_VTX_FMT_1);
+    int size = r200 ? r200_vtx_dwords(fmt, fmt1) : ati_vtx_dwords(fmt);
     int count = MIN(VF_NUM_VERTICES(vf), n / size);
     int i;
 
@@ -1035,7 +1346,11 @@ static void ati_3d_draw_vertices(ATIVGAState *s, uint32_t fmt, uint32_t vf,
     count = MIN(count, ATI_3D_MAX_VERTS);
     v = g_new(ATIVertex, count);
     for (i = 0; i < count; i++) {
-        ati_vtx_parse(s, fmt, vf, d + i * size, &v[i]);
+        if (r200) {
+            r200_vtx_parse(fmt, fmt1, vf, d + i * size, &v[i]);
+        } else {
+            ati_vtx_parse(s, fmt, vf, d + i * size, &v[i]);
+        }
     }
     trace_ati_3d_draw(VF_PRIM(vf), count, fmt, c.tex[0].enabled);
     ati_prims(&c, VF_PRIM(vf), v, count);
@@ -1053,8 +1368,9 @@ void ati_3d_packet(ATIVGAState *s, uint8_t op, const uint32_t *d, uint32_t n)
         break;
     case 0x35: /* 3D_DRAW_IMMD_2: VF_CNTL, vertices */
         if (n >= 1) {
-            ati_3d_draw_vertices(s, r3d(s, R3D_SE_VTX_FMT), d[0], d + 1,
-                                 n - 1);
+            ati_3d_draw_vertices(s, r3d(s, ati_is_r200(s) ? R200_SE_VTX_FMT_0 :
+                                                            R3D_SE_VTX_FMT),
+                                 d[0], d + 1, n - 1);
         }
         break;
     default:
