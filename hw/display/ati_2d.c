@@ -111,7 +111,6 @@ static void setup_2d_blt_ctx(ATIVGAState *s, ATI2DCtx *ctx)
     ctx->host_data_active = s->host_data.active;
     ctx->left_to_right = s->regs.dp_cntl & DST_X_LEFT_TO_RIGHT;
     ctx->top_to_bottom = s->regs.dp_cntl & DST_Y_TOP_TO_BOTTOM;
-    ctx->need_swap = (HOST_BIG_ENDIAN != s->vga.big_endian_fb);
     ctx->frgd_clr = s->regs.dp_brush_frgd_clr;
     ctx->bkgd_clr = s->regs.dp_brush_bkgd_clr;
     ctx->brush_type = s->regs.dp_datatype & DP_BRUSH_DATATYPE;
@@ -120,6 +119,8 @@ static void setup_2d_blt_ctx(ATIVGAState *s, ATI2DCtx *ctx)
     ctx->lsb_first = s->regs.dp_datatype & DP_BYTE_PIX_ORDER;
     ctx->write_mask = s->regs.dp_write_mask;
     ctx->dst_offset = ati_fb_offset(s, s->regs.dst_offset);
+    /* pixels are kept in the order of the swap at their address */
+    ctx->need_swap = HOST_BIG_ENDIAN != (ati_vram_xm(s, ctx->dst_offset) != 0);
 
     ctx->scissor.width = s->regs.sc_right - s->regs.sc_left + 1;
     ctx->scissor.height = s->regs.sc_bottom - s->regs.sc_top + 1;

@@ -65,14 +65,12 @@ static void ati_vga_set_offset(VGACommonState *vga, uint32_t offs)
     vga->vbe_start_addr = offs / 4;
 }
 
+static int ati_nonsurf_xm(ATIVGAState *s);
+
+/* the display reads the visible buffer in the order it is kept in */
 static bool ati_big_endian_fb(ATIVGAState *s)
 {
-    /* Radeon has the frame buffer aperture swap controls in SURFACE_CNTL */
-    return s->regs.config_cntl & (APER_0_ENDIAN | APER_1_ENDIAN) ||
-           s->regs.surface_cntl & (NONSURF_AP0_SWP_16BPP |
-                                   NONSURF_AP0_SWP_32BPP |
-                                   NONSURF_AP1_SWP_16BPP |
-                                   NONSURF_AP1_SWP_32BPP);
+    return (s->vis_pin ? s->vis_xm : ati_nonsurf_xm(s)) != 0;
 }
 
 /*
@@ -114,20 +112,26 @@ static int ati_nonsurf_xm(ATIVGAState *s)
 
 /*
  * Surface n covers [*lo, *hi] of the video memory with its own swap
- * (SURFACE_INFO uses the bits of SURFACE_CNTL); the bounds are GPU
- * addresses. A surface with its upper bound below its lower one is off.
+ * (SURFACE_INFO uses the bits of SURFACE_CNTL). The bounds are offsets in
+ * the video memory, in bits 26 to 10, so in 1 KB steps: AmigaOS 4.0 gives
+ * GPU addresses, whose top bits the surface does not look at, and AmigaOS
+ * 4.1 Final Edition offsets with an upper bound of 0xffffffff. A surface
+ * with its upper bound below its lower one is off.
  */
 static bool ati_surface(ATIVGAState *s, int n, uint32_t *lo, uint32_t *hi,
                         int *xm)
 {
     uint32_t base = SURFACE0_LOWER_BOUND + n * 0x10;
-    uint32_t lower = s->mmregs[base / 4];
-    uint32_t upper = s->mmregs[(base + 4) / 4];
+    uint32_t lower = s->mmregs[base / 4] & 0x07fffc00;
+    uint32_t upper = s->mmregs[(base + 4) / 4] | 0x3ff;
 
-    if (upper <= lower || !ati_gpu_vram_offset(s, lower, lo)) {
+    upper &= 0x07ffffff;
+    if (!s->mmregs[(base + 4) / 4] || upper <= lower ||
+        lower >= s->vga.vram_size) {
         return false;
     }
-    *hi = MIN(*lo + (upper - lower), s->vga.vram_size - 1);
+    *lo = lower;
+    *hi = MIN(upper, s->vga.vram_size - 1);
     *xm = ati_swp_xm(s->mmregs[(base + 8) / 4]);
     return true;
 }
@@ -144,7 +148,45 @@ int ati_vram_xm(ATIVGAState *s, uint32_t off)
             }
         }
     }
+    if (s->vis_pin && off >= s->vis_lo && off <= s->vis_hi) {
+        return s->vis_xm;
+    }
     return ati_nonsurf_xm(s);
+}
+
+/* reorders the bytes of the dwords in [lo, hi] by the byte address mask */
+static void ati_vram_permute(ATIVGAState *s, uint32_t lo, uint32_t hi,
+                             int mask)
+{
+    uint32_t *p, *end, v;
+
+    lo &= ~3;
+    if (!mask || lo >= s->vga.vram_size || hi < lo) {
+        return;
+    }
+    hi = MIN(hi | 3, s->vga.vram_size - 1);
+    p = (uint32_t *)(s->vga.vram_ptr + lo);
+    end = (uint32_t *)(s->vga.vram_ptr + hi + 1);
+    /* the same on hosts of either byte order */
+    switch (mask) {
+    case 1: /* the bytes of each 16 bit word */
+        for (; p < end; p++) {
+            v = *p;
+            *p = ((v & 0x00ff00ffu) << 8) | ((v >> 8) & 0x00ff00ffu);
+        }
+        break;
+    case 2: /* the 16 bit words */
+        for (; p < end; p++) {
+            v = *p;
+            *p = (v << 16) | (v >> 16);
+        }
+        break;
+    default: /* all four bytes */
+        for (; p < end; p++) {
+            *p = bswap32(*p);
+        }
+        break;
+    }
 }
 
 /*
@@ -154,25 +196,130 @@ int ati_vram_xm(ATIVGAState *s, uint32_t off)
 static void ati_vram_reswap(ATIVGAState *s, uint32_t lo, uint32_t hi,
                             int from, int to)
 {
-    int mask = from ^ to;
-    uint8_t *p, t[4];
-    uint32_t a;
-    int i;
-
-    lo &= ~3;
-    hi |= 3;
-    if (!mask || lo >= s->vga.vram_size) {
+    if (from == to || lo >= s->vga.vram_size) {
         return;
     }
-    hi = MIN(hi, s->vga.vram_size - 1);
-    for (a = lo; a < hi; a += 4) {
-        p = s->vga.vram_ptr + a;
-        for (i = 0; i < 4; i++) {
-            t[i] = p[i ^ mask];
-        }
-        memcpy(p, t, 4);
+    ati_vram_permute(s, lo, hi, from ^ to);
+    hi = MIN(hi | 3, s->vga.vram_size - 1);
+    memory_region_set_dirty(&s->vga.vram, lo & ~3, hi + 1 - (lo & ~3));
+}
+
+/* the part of the video memory that the display shows */
+static bool ati_visible(ATIVGAState *s, uint32_t *lo, uint32_t *hi, int *bpp)
+{
+    VGACommonState *vga = &s->vga;
+    uint32_t len;
+
+    if (s->mode != EXT_MODE ||
+        !(vga->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_ENABLED)) {
+        return false;
     }
-    memory_region_set_dirty(&s->vga.vram, lo, hi + 1 - lo);
+    *bpp = vga->vbe_regs[VBE_DISPI_INDEX_BPP];
+    *lo = vga->vbe_start_addr * 4;
+    len = vga->vbe_line_offset * vga->vbe_regs[VBE_DISPI_INDEX_YRES];
+    if (!len || *lo >= vga->vram_size) {
+        return false;
+    }
+    *hi = MIN(*lo + len, vga->vram_size) - 1;
+    return true;
+}
+
+/* whether the display can show pixels of bpp bits kept with swap xm */
+static bool ati_xm_displayable(int xm, int bpp)
+{
+    switch (bpp) {
+    case 32:
+        return xm == 0 || xm == 3;
+    case 15:
+    case 16:
+        return xm == 0 || xm == 1;
+    default:
+        return true;
+    }
+}
+
+/*
+ * The visible buffer goes back to the order of the memory around it, as
+ * the display is about to show another one.
+ */
+static void ati_vis_unpin(ATIVGAState *s)
+{
+    if (s->vis_pin) {
+        s->vis_pin = false;
+        ati_vram_reswap(s, s->vis_lo, s->vis_hi, s->vis_xm,
+                        ati_nonsurf_xm(s));
+    }
+}
+
+/*
+ * The swap outside the surfaces changes: the memory that no surface
+ * covers is reordered to what the CPU now sees, so that the CPU and the
+ * engines agree whichever swap was on when it was written. Drivers flip it
+ * between bitmaps: AmigaOS writes 16 bit bitmaps with the 16 bit swap and
+ * 32 bit ones with the 32 bit swap, and turns it off to read pixels. The
+ * visible buffer follows only into an order the display can show (32 bit
+ * pixels with no swap or the 32 bit one, 16 bit ones with no swap or the
+ * 16 bit one); otherwise it keeps its order until it does.
+ */
+static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
+{
+    uint32_t lo[ATI_SURFACES + 1], hi[ATI_SURFACES + 1];
+    uint32_t start = 0, end, vlo = 0, vhi = 0;
+    int n, i, k = 0, xm, bpp = 0, cur, target;
+    bool vis;
+
+    if (from == to) {
+        return;
+    }
+    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+        for (n = 0; n < ATI_SURFACES; n++) {
+            if (ati_surface(s, n, &lo[k], &hi[k], &xm)) {
+                k++;
+            }
+        }
+    }
+    vis = ati_visible(s, &vlo, &vhi, &bpp);
+    if (s->vis_pin && (!vis || vlo != s->vis_lo || vhi != s->vis_hi)) {
+        /* should not happen: the pin goes when the display changes */
+        ati_vram_reswap(s, s->vis_lo, s->vis_hi, s->vis_xm, from);
+        s->vis_pin = false;
+    }
+    if (vis) {
+        lo[k] = vlo;
+        hi[k] = vhi;
+        k++;
+    }
+    while (start < s->vga.vram_size) {
+        /* skip the surfaces (and the visible buffer) that cover start */
+        for (i = 0; i < k; i++) {
+            if ((lo[i] & ~3) <= start && hi[i] >= start) {
+                start = (hi[i] | 3) + 1;
+                i = -1;
+            }
+        }
+        if (start >= s->vga.vram_size) {
+            break;
+        }
+        /* reorder up to the next one */
+        end = s->vga.vram_size;
+        for (i = 0; i < k; i++) {
+            if ((lo[i] & ~3) > start) {
+                end = MIN(end, lo[i] & ~3);
+            }
+        }
+        ati_vram_permute(s, start, end - 1, from ^ to);
+        start = end;
+    }
+    if (vis) {
+        cur = s->vis_pin ? s->vis_xm : from;
+        target = ati_xm_displayable(to, bpp) ? to : cur;
+        ati_vram_reswap(s, vlo, vhi, cur, target);
+        s->vis_pin = target != to;
+        s->vis_lo = vlo;
+        s->vis_hi = vhi;
+        s->vis_xm = target;
+        s->vga.big_endian_fb = target != 0;
+    }
 }
 
 static inline void ati_reg_write_offs(uint32_t *reg, int offs,
@@ -248,6 +395,7 @@ static void ati_surface_write(ATIVGAState *s, hwaddr addr, uint64_t data,
 
 static void ati_vga_switch_mode(ATIVGAState *s)
 {
+    ati_vis_unpin(s);
     DPRINTF("%d -> %d\n",
             s->mode, !!(s->regs.crtc_gen_cntl & CRTC2_EXT_DISP_EN));
     if (s->regs.crtc_gen_cntl & CRTC2_EXT_DISP_EN) {
@@ -1078,9 +1226,13 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         vga_ioport_write(&s->vga, VGA_PEL_D, (data >> 12) & 0xff);
         vga_ioport_write(&s->vga, VGA_PEL_D, (data >> 2) & 0xff);
         break;
-    case CNFG_CNTL:
+    case CNFG_CNTL: {
+        int xm = ati_nonsurf_xm(s);
+
         s->regs.config_cntl = data;
+        ati_nonsurf_reswap(s, xm, ati_nonsurf_xm(s));
         break;
+    }
     case 0x2200 ... 0x220f: /* SE_TCL_VECTOR/SCALAR_INDX/DATA_REG */
         if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF && size == 4 &&
             !(addr & 3)) {
@@ -1091,7 +1243,11 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         break;
     case SURFACE_CNTL:
         if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+            int xm = ati_nonsurf_xm(s);
+
+            trace_ati_reg_store(addr, data);
             s->regs.surface_cntl = data;
+            ati_nonsurf_reswap(s, xm, ati_nonsurf_xm(s));
             if (s->mode == EXT_MODE) {
                 s->vga.big_endian_fb = ati_big_endian_fb(s);
             }
@@ -1120,8 +1276,12 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         s->regs.crtc_v_sync_strt_wid = data & 0x9f0fff;
         break;
     case CRTC_OFFSET:
+        ati_vis_unpin(s);
         s->regs.crtc_offset = data & 0x87fffff8;
         ati_vga_set_offset(&s->vga, s->regs.crtc_offset & 0x07ffffff);
+        if (s->mode == EXT_MODE) {
+            s->vga.big_endian_fb = ati_big_endian_fb(s);
+        }
         break;
     case CRTC_OFFSET_CNTL:
         s->regs.crtc_offset_cntl = data; /* FIXME */
@@ -1694,6 +1854,7 @@ static void ati_vga_reset(DeviceState *dev)
     s->regs.surface_cntl = 0;
     ati_cp_reset(s);
     memset(&s->tcl, 0, sizeof(s->tcl));
+    s->vis_pin = false;
 }
 
 static void ati_vga_exit(PCIDevice *dev)

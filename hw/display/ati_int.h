@@ -208,6 +208,13 @@ struct ATIVGAState {
     ATIHostDataState host_data;
     ATICPState cp;
     ATITCLState tcl;
+    /*
+     * The visible buffer kept in another order than the memory around it,
+     * as the display cannot show the swap that the CPU now uses there
+     */
+    bool vis_pin;
+    uint32_t vis_lo, vis_hi;
+    int vis_xm;
     uint32_t *mmregs;   /* registers that are only stored */
 };
 
