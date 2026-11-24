@@ -83,6 +83,21 @@ config SAM460EX
     select USB_OHCI_SYSBUS
     select FDT_PPC
 
+config SAM440EP
+    bool
+    default y
+    depends on PPC && FDT
+    imply ATI_VGA
+    select PFLASH_CFI01
+    select IDE_SII3112
+    select M41T80
+    select PPC440
+    select SERIAL_MM
+    select SMBUS_EEPROM
+    select PCI_BRIDGE
+    select USB_OHCI_PCI
+    select UNIMP
+
 config AMIGAONE
     bool
     default y

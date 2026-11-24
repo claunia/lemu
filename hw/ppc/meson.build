@@ -70,6 +70,7 @@ ppc_ss.add(when: 'CONFIG_PPC4XX', if_true: files(
   'ppc4xx_devs.c',
   'ppc4xx_sdram.c'))
 ppc_ss.add(when: 'CONFIG_SAM460EX', if_true: files('sam460ex.c'))
+ppc_ss.add(when: 'CONFIG_SAM440EP', if_true: files('sam440ep.c'))
 # PReP
 ppc_ss.add(when: 'CONFIG_PREP', if_true: files('prep.c'))
 ppc_ss.add(when: 'CONFIG_PREP', if_true: files('prep_systemio.c'))
