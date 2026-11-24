@@ -60,5 +60,6 @@ AGP card runs as a PCI one there.
   a sample.
 - Install: First Flight, Installation, New Installation, automatic
   partitioning. It takes about 4 minutes.
-- Rebooting from MorphOS (or `system_reset`) hangs after ABox: restart QEMU
-  instead.
+- Rebooting: MorphOS reboots by jumping to the firmware's reset vector at
+  0xfff00100. With VOF the board puts code there that resets the machine
+  through the VT8231's keyboard controller. `system_reset` works too.

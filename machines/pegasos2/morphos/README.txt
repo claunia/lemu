@@ -10,7 +10,7 @@ Network is QEMU user mode NAT. eth1 (via_rhinepci.device) gets its address by DH
 Network prefs: Use and Save only apply what was changed. On a fresh system, change the interface (for example to Static and back to DHCP) before Use.
 Sound: AHI with pegasos.audio. C:Play plays a sample, e.g. Play SYS:Games/Diamonds/Sfx/gameend.wav.
 Graphics: the Radeon driver draws with the command processor through its PIO path. "Radeon: Failed to allocate CCE DMA memory" on the serial port is normal: MorphOS only does Radeon DMA on PCI Express cards or behind Apple's AGP bridges, and a real Pegasos II has neither.
-Shut down: Ambient menu, Shut Down, Shutdown. The window closes when MorphOS is done. Rebooting from MorphOS does not work yet: quit and run again.
+Shut down: Ambient menu, Shut Down, Shutdown. The window closes when MorphOS is done. Reboot from the same menu works.
 MorphOS is not free software: see morphos-team.net for its license and registration.
 macOS: if the binary is blocked, run xattr -cr . in this folder.
 

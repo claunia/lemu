@@ -45,6 +45,28 @@
 
 #include <libfdt.h>
 
+/*
+ * To reboot, MorphOS jumps to the firmware's reset vector at 0xfff00100.
+ * With VOF the ROM is empty, so put code there that resets the machine:
+ * it turns translation off and sends the reset command (0xfe) to the
+ * VT8231's keyboard controller at ISA port 0x64 (0xfe000064).
+ */
+static const uint8_t pegasos2_reset_stub[] = {
+    0x7c, 0x60, 0x00, 0xa6,     /* 0x100 mfmsr  r3 */
+    0x54, 0x63, 0x07, 0x32,     /*       rlwinm r3,r3,0,28,25 (IR, DR) */
+    0x7c, 0x7b, 0x03, 0xa6,     /*       mtsrr1 r3 */
+    0x3c, 0x80, 0xff, 0xf0,     /*       lis    r4,0xfff0 */
+    0x60, 0x84, 0x01, 0x20,     /*       ori    r4,r4,0x120 */
+    0x7c, 0x9a, 0x03, 0xa6,     /*       mtsrr0 r4 */
+    0x4c, 0x00, 0x00, 0x64,     /*       rfi */
+    0x48, 0x00, 0x00, 0x00,     /*       b      . */
+    0x3c, 0x60, 0xfe, 0x00,     /* 0x120 lis    r3,0xfe00 */
+    0x38, 0x80, 0x00, 0xfe,     /*       li     r4,0xfe */
+    0x98, 0x83, 0x00, 0x64,     /*       stb    r4,0x64(r3) */
+    0x7c, 0x00, 0x04, 0xac,     /*       sync */
+    0x48, 0x00, 0x00, 0x00,     /*       b      . */
+};
+
 #define PROM_FILENAME "vof.bin"
 #define PROM_ADDR     0xfff00000
 #define PROM_SIZE     0x80000
@@ -211,6 +233,11 @@ static void pegasos_init(MachineState *machine)
     g_free(filename);
     if (pm->vof) {
         pm->vof->fw_size = sz;
+        if (pm->type == PEGASOS2) {
+            rom_add_blob_fixed("pegasos2-reset", pegasos2_reset_stub,
+                               sizeof(pegasos2_reset_stub),
+                               PROM_ADDR + 0x100);
+        }
     }
 
     /* north bridge */
