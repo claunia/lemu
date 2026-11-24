@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 slow_qtests = {
   'ahci-test': 150,
   'aspeed_smc-test': 360,
@@ -87,6 +88,7 @@ qtests_i386 = \
   (config_all_devices.has_key('CONFIG_WDT_IB700') ? ['wdt_ib700-test'] : []) +              \
   (config_all_devices.has_key('CONFIG_PVPANIC_ISA') ? ['pvpanic-test'] : []) +              \
   (config_all_devices.has_key('CONFIG_PVPANIC_PCI') ? ['pvpanic-pci-test'] : []) +          \
+  (config_all_devices.has_key('CONFIG_ATI_VGA') ? ['ati-3d-test'] : []) +                  \
   (config_all_devices.has_key('CONFIG_HDA') ? ['intel-hda-test'] : []) +                    \
   (config_all_devices.has_key('CONFIG_I82801B11') ? ['i82801b11-test'] : []) +             \
   (config_all_devices.has_key('CONFIG_IOH3420') ? ['ioh3420-test'] : []) +                  \
