@@ -1,4 +1,4 @@
-MorphOS 3.21 on QEMU's Genesi/bPlan Pegasos II (MPC7457 G4, 1 GB, 64 MB R200 Radeon in the AGP slot, IDE disk, VIA Rhine-II Ethernet, VIA AC97 sound)
+MorphOS 3.21 on QEMU's Genesi/bPlan Pegasos II (MPC7457 G4, 1 GB, 64 MB Radeon 9250 in the AGP slot, IDE disk, VIA Rhine-II Ethernet, VIA AC97 sound)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 There is no Pegasos II firmware here: QEMU's Virtual Open Firmware starts boot.img, MorphOS's boot image, which boots MorphOS from the disk. The Ambient desktop comes up in under a minute at 1920x1080; Prefs/Screens changes the mode.
