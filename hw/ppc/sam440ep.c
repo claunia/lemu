@@ -21,9 +21,9 @@
  * controller at 05 and the slots at 06, 07 and 08. The interrupts of all of
  * them go to five UIC inputs: 25, 26, 27, 29 and 50 (UIC1 18).
  *
- * Not modelled yet: the two EMACs; a PCI NIC in slot 07 (a 3c905c, which
- * AmigaOS 4.1 drives with eth3com.device) stands in for the network. The
- * Radeon is an rv100 for now.
+ * The two on-chip EMACs work through the MAL and are the default NICs
+ * (ppc440ep_eth.device); a 3c905c (eth3com.device) goes in PCI slot 07.
+ * The Radeon is an rv100 for now.
  */
 
 #include "qemu/osdep.h"
@@ -323,6 +323,7 @@ static void sam440ep_init(MachineState *machine)
     PCIBus *pci_bus, *sec_bus;
     PCIDevice *pdev;
     NICInfo *nd;
+    Ppc4xxMalState *mal;
     I2CBus *i2c;
     USBBus *usb_bus;
     uint8_t *eeprom, *boot_eeprom;
@@ -398,6 +399,7 @@ static void sam440ep_init(MachineState *machine)
 
     /* memory access layer, for the EMACs */
     dev = qdev_new(TYPE_PPC4xx_MAL);
+    mal = PPC4xx_MAL(dev);
     qdev_prop_set_uint8(dev, "txc-num", 4);
     qdev_prop_set_uint8(dev, "rxc-num", 2);
     ppc4xx_dcr_realize(PPC4xx_DCR_DEVICE(dev), cpu, &error_fatal);
@@ -526,19 +528,49 @@ static void sam440ep_init(MachineState *machine)
     }
 
     /*
-     * The first NIC goes in slot 07. Its INTA is IRQ 29, as U-Boot sets it;
-     * slot 06's INTA is IRQ 50 on UIC1, which the AmigaOS 4.1 kernel never
-     * enables. Any more NICs take the free slots.
+     * The two on-chip EMACs behind the ZMII bridge, with their PHYs at 24
+     * and 25, take the first two NICs, those with model=ppc4xx-emac or no
+     * model. Their MAC addresses go to bytes 0xf0-0xfb of the boot EEPROM
+     * at 0x53, where our U-Boot reads them when its environment has no
+     * ethaddr and eth1addr; AmigaOS takes them from the saved environment.
      */
-    nd = qemu_find_nic_info(MACHINE_GET_CLASS(machine)->default_nic, true,
-                            NULL);
+    sysbus_create_simple(TYPE_PPC4XX_ZMII, 0xef600d00, NULL);
+    for (i = 0; i < 2; i++) {
+        MACAddr mac;
+
+        dev = qdev_new(TYPE_PPC4XX_EMAC);
+        object_property_set_link(OBJECT(dev), "mal", OBJECT(mal),
+                                 &error_abort);
+        qdev_prop_set_uint32(dev, "tx-channel", i * 2);
+        qdev_prop_set_uint32(dev, "rx-channel", i);
+        qdev_prop_set_uint32(dev, "phy-addr", 24 + i);
+        nd = qemu_find_nic_info(TYPE_PPC4XX_EMAC, true, NULL);
+        if (nd) {
+            qdev_set_nic_properties(dev, nd);
+            mac = nd->macaddr;
+        } else {
+            qemu_macaddr_default_if_unset(&mac);
+            qdev_prop_set_macaddr(dev, "mac", mac.a);
+        }
+        memcpy(boot_eeprom + 256 + 0xf0 + i * 6, mac.a, 6);
+        sbdev = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(sbdev, &error_fatal);
+        sysbus_mmio_map(sbdev, 0, 0xef600e00 + i * 0x100);
+        sysbus_connect_irq(sbdev, 0, qdev_get_gpio_in(uic[1], 28 + i * 2));
+    }
+
+    /*
+     * A 3c905c (eth3com.device) goes in slot 07. Its INTA is IRQ 29, as
+     * U-Boot sets it; slot 06's INTA is IRQ 50 on UIC1, which the AmigaOS
+     * 4.1 kernel never enables. Any other NICs take the free slots.
+     */
+    nd = qemu_find_nic_info("3c905c", false, NULL);
     if (nd) {
-        pdev = pci_new(PCI_DEVFN(SAM_DEV_SLOT1 + 1, 0),
-                       nd->model ?: MACHINE_GET_CLASS(machine)->default_nic);
+        pdev = pci_new(PCI_DEVFN(SAM_DEV_SLOT1 + 1, 0), "3c905c");
         qdev_set_nic_properties(DEVICE(pdev), nd);
         pci_realize_and_unref(pdev, sec_bus, &error_fatal);
     }
-    pci_init_nic_devices(sec_bus, MACHINE_GET_CLASS(machine)->default_nic);
+    pci_init_nic_devices(sec_bus, "3c905c");
 
     sam440ep_load_firmware(machine);
 }
@@ -551,7 +583,7 @@ static void sam440ep_machine_init(MachineClass *mc)
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("440epb");
     mc->default_ram_size = 512 * MiB;
     mc->default_ram_id = "ppc4xx.sdram";
-    mc->default_nic = "3c905c";
+    mc->default_nic = TYPE_PPC4XX_EMAC;
     machine_add_audiodev_property(mc);
 }
 
