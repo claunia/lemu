@@ -460,8 +460,17 @@ static void sam460ex_init(MachineState *machine)
     sysbus_connect_irq(sbdev, 0, qdev_get_gpio_in(uic[2], 30));
     usb_bus = USB_BUS(object_resolve_type_unambiguous(TYPE_USB_BUS,
                                                       &error_abort));
-    usb_create_simple(usb_bus, "usb-kbd");
-    usb_create_simple(usb_bus, "usb-mouse");
+    /*
+     * A keyboard and a mouse are full speed devices on the OHCI companion,
+     * as on the real board. As high speed devices on the EHCI MorphOS polls
+     * the keyboard every few hundred milliseconds and drops keys.
+     */
+    for (i = 0; i < 2; i++) {
+        USBDevice *ud = USB_DEVICE(qdev_new(i ? "usb-mouse" : "usb-kbd"));
+
+        qdev_prop_set_uint32(DEVICE(ud), "usb_version", 1);
+        usb_realize_and_unref(ud, usb_bus, &error_fatal);
+    }
 
     /* PCIe buses */
     dev = qdev_new(TYPE_PPC460EX_PCIE_HOST);
