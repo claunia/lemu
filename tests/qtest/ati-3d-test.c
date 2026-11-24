@@ -77,6 +77,7 @@
 #define PRIM_RECTS          8
 #define WALK_IND            (1 << 4)
 #define WALK_DATA           (3 << 4)
+#define VF_COLOR_RGBA       (1 << 6)
 
 #define RED                 0xffff0000
 #define GREEN               0xff00ff00
@@ -357,6 +358,28 @@ static void test_surface_swap(void)
 }
 
 /*
+ * With VF_COLOR_ORDER_RGBA a packed colour is R, G, B, A in memory: the
+ * dword is ABGR, as Mesa's r100 driver and Warp3D send it.
+ */
+static void test_color_order(void)
+{
+    uint32_t d[2 + 3 * 4] = {
+        FMT_COLOR, PRIM_RECTS | WALK_DATA | VF_COLOR_RGBA | 3 << 16,
+        f2u(0), f2u(0), f2u(0.5f), 0xff00b0ff,
+        f2u(8), f2u(0), f2u(0.5f), 0xff00b0ff,
+        f2u(8), f2u(8), f2u(0.5f), 0xff00b0ff,
+    };
+    Ctx t;
+
+    start(&t);
+    clear(&t, DEPTH_16);
+    reg(&t, RB3D_CNTL, RB_COLOR_ARGB8888);
+    pkt3(&t, 0x29, d, ARRAY_SIZE(d));
+    g_assert_cmphex(pixel(&t, 2, 2), ==, 0xffffb000);
+    stop(&t);
+}
+
+/*
  * A texel written while SURFACE_CNTL swaps 32 bit words outside the
  * surfaces: the engine still sees it little endian after the swap is off.
  */
@@ -391,6 +414,7 @@ int main(int argc, char **argv)
     qtest_add_func("/ati-3d/indexed", test_indexed);
     qtest_add_func("/ati-3d/mipmap", test_mipmap);
     qtest_add_func("/ati-3d/surface-swap", test_surface_swap);
+    qtest_add_func("/ati-3d/color-order", test_color_order);
     qtest_add_func("/ati-3d/nonsurf-swap", test_nonsurf_swap);
     return g_test_run();
 }

@@ -1684,13 +1684,18 @@ static int ati_vtx_dwords(uint32_t fmt)
     return n;
 }
 
+/*
+ * A packed colour is four bytes in memory order: B, G, R, A by default
+ * (the dword is ARGB), or R, G, B, A with VF_COLOR_ORDER_RGBA (the dword
+ * is ABGR), as Mesa's r100 and r200 drivers send it.
+ */
 static void ati_unpack_color(uint32_t p, bool rgba, float out[4])
 {
     if (rgba) {
-        out[0] = (p >> 24) / 255.0f;
-        out[1] = ((p >> 16) & 0xff) / 255.0f;
-        out[2] = ((p >> 8) & 0xff) / 255.0f;
-        out[3] = (p & 0xff) / 255.0f;
+        out[0] = (p & 0xff) / 255.0f;
+        out[1] = ((p >> 8) & 0xff) / 255.0f;
+        out[2] = ((p >> 16) & 0xff) / 255.0f;
+        out[3] = (p >> 24) / 255.0f;
     } else {
         argb_to_float(p, out);
     }
@@ -1731,6 +1736,8 @@ static void ati_vtx_parse(ATI3DCtx *c, uint32_t fmt, uint32_t vf,
     if (fmt & VTX_PKCOLOR) {
         ati_unpack_color(d[i++], vf & VF_COLOR_ORDER_RGBA, v->c);
     }
+    trace_ati_3d_vertex(v->x, v->y, fmt, vf, v->c[0] * 255, v->c[1] * 255,
+                        v->c[2] * 255, v->c[3] * 255);
     /* the specular alpha is the fog factor; with no fog there is none */
     v->spec[3] = 1.0f;
     if (fmt & VTX_FPSPEC) {
