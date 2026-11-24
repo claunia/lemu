@@ -1,5 +1,7 @@
 # One build for all kits
 
+<!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
+
 These scripts build QEMU once for all the kits: the nine binaries the
 kits use, for macOS, Linux and Windows. Each machine's own `release/`
 folder then packs its kits from that one build. Without them, each of
@@ -11,6 +13,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-ppc | aix415rs6k, aix433rs6k, aix51rs6k, nt351powerpc, nt40powerpc, os2powerpc, sol251powerpc | `../40p/release/mkrelease.sh` |
 | qemu-system-ppc | aix325rs6000 | `../7006/release/mkrelease.sh` |
 | qemu-system-ppc | aos40amigaone | `../amigaone/release/mkrelease.sh` |
+| qemu-system-ppc | aos41sam440ep | `../sam440ep/release/mkrelease.sh` |
 | qemu-system-ppc64 | aix53pseries, aix61pseries, aix71pseries, aix72pseries | `../pseries/release/mkrelease.sh` |
 | qemu-system-alpha | nt31axp, nt351axp, nt40axp, vms15axp | `../jensen/release/pack.sh` |
 | qemu-system-mips64el | nt31mips, nt351-jazz, nt351-rm200, nt4-jazz, nt4-rm200, nt4-rm200-smp, nt4srv-rm300-smp4 | `../rm200/release/pack.sh` |
@@ -93,6 +96,7 @@ these folders in place of their own build, for example:
     sh ../40p/release/mkrelease.sh nt VMDIR STAGE/ppc nt40powerpc-lemu.tar.lz
     sh ../7006/release/mkrelease.sh VMDIR STAGE/ppc aix325rs6000-lemu.tar.lz
     sh ../amigaone/release/mkrelease.sh aos40 VMDIR STAGE/ppc aos40amigaone-lemu.tar.lz
+    sh ../sam440ep/release/mkrelease.sh aos41 VMDIR STAGE/ppc aos41sam440ep-lemu.tar.lz
     sh ../pseries/release/mkrelease.sh aix53 VMDIR STAGE/ppc64 aix53pseries-lemu.tar.lz
     sh ../jensen/release/pack.sh nt40 SRCDIR STAGE/alpha nt40axp-lemu.tar.lz
     sh ../pc/release/pack.sh nt351 VMDIR STAGE/i386 nt351x86-lemu.tar.lz
