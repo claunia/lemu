@@ -488,9 +488,10 @@ static void sam440ep_init(MachineState *machine)
     pci_realize_and_unref(pdev, pci_bus, &error_fatal);
     sec_bus = pci_bridge_get_sec_bus(PCI_BRIDGE(pdev));
 
-    /* the Radeon Mobility M9 */
+    /* the Radeon Mobility M9, with 64 MB */
     pdev = pci_new(PCI_DEVFN(SAM_DEV_RADEON, 0), "ati-vga");
     qdev_prop_set_string(DEVICE(pdev), "model", "rv250");
+    qdev_prop_set_uint32(DEVICE(pdev), "vgamem_mb", 64);
     pci_realize_and_unref(pdev, pci_bus, &error_fatal);
 
     /* the CS4281 sound */

@@ -3,8 +3,8 @@
 <!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
 
 **TL;DR** `aos41/run.sh` boots AmigaOS 4.1 on `-M sam440ep` from a U-Boot
-built from source. Graphics (Radeon Mobility M9, 2D, CP and the 3D that
-compositing uses), network (the on-chip EMAC) and sound (CS4281, playback)
+built from source. Graphics (Radeon Mobility M9 with 64 MB, 2D, CP and 3D
+for compositing and Warp3D), network (the on-chip EMAC) and sound (CS4281, playback)
 work.
 
 ## Kit
@@ -33,7 +33,7 @@ work.
 | CPU | PowerPC 440EP | |
 | SATA | SiI3114 behind the PCI-PCI bridge | `sii3114ide.device` |
 | USB | `isp1561-ohci`, with a USB keyboard and mouse | `ohci.usbhcd` |
-| Graphics | `ati-vga,model=rv250` at 0c (1002:4c66, the Mobility M9), 2D, CP and an R200 3D subset | `ATIRadeon.chip` |
+| Graphics | `ati-vga,model=rv250` at 0c (1002:4c66, the Mobility M9, 64 MB), 2D, CP and R200 3D | `ATIRadeon.chip`, `W3D_R200.library` |
 | Ethernet | the two on-chip EMACs (`ppc4xx-emac`) through the MAL and the ZMII bridge, PHYs at 24 and 25 | `ppc440ep_eth.device` |
 | Ethernet, optional | `3c905c` in PCI slot 07 (`-nic ...,model=3c905c`) | `eth3com.device` |
 | Sound | `cs4281` at 0e, with an ALC655 codec | `cs4281.audio` (AHI) |
@@ -87,3 +87,7 @@ the boot EEPROM and saves the environment when they are not set.
   register combiners and blending. It writes the texture and stage enables
   to 0x2cc0 and gives texture coordinates in texels (`SE_VTE_CNTL` bit 12).
   With an `rv100` the screen works but the AmiDock never shows.
+- Warp3D works through `W3D_R200`: GLQuake and Quake III Arena (both from
+  Aminet) run with the MiniGL 2.0 of the 4.1 CD. With only 16 MB, as the
+  board had before it got the real 64 MB, `W3D_R200` finds no room for a
+  Z buffer at 1024x768x32.
