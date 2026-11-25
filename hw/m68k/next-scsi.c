@@ -400,7 +400,11 @@ static void next_scsi_dma_initbuf(void *opaque, NeXTDMAChannel ch,
 
     s->status = 0;
     s->buf_size = 0;
-    s->buf_limit = offset;
+    /*
+     * The buffer moves long words: a start that is not on one would let
+     * a long word run past its end
+     */
+    s->buf_limit = offset & (NEXT_DMA_BURST - 4);
 }
 
 /* Previous's dma_esp_flush_buffer(): writes one long word */
@@ -429,7 +433,7 @@ static void next_scsi_flush(NeXTSCSIState *s)
         if (s->buf_size == 0) {
             s->buf_limit = 0;
         }
-    } else if (c->next < c->limit) {
+    } else if (c->next < c->limit && s->buf_limit - s->buf_size <= NEXT_DMA_BURST - 4) {
         while (s->buf_size < 4) {
             s->buf[s->buf_limit++] = 0;
             s->buf_size++;
@@ -588,10 +592,23 @@ static void next_scsi_reset_hold(Object *obj, ResetType type)
     }
 }
 
+static int next_scsi_post_load(void *opaque, int version_id)
+{
+    NeXTSCSIState *s = opaque;
+
+    if (s->buf_limit < 0 || s->buf_limit > NEXT_DMA_BURST ||
+        s->buf_size < 0 || s->buf_size > s->buf_limit ||
+        s->q_head >= NEXT_SCSI_QUEUE || s->q_len > NEXT_SCSI_QUEUE) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
 static const VMStateDescription next_scsi_vmstate = {
     .name = "next-scsi",
     .version_id = 1,
     .minimum_version_id = 1,
+    .post_load = next_scsi_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT8(control, NeXTSCSIState),
         VMSTATE_UINT8(status, NeXTSCSIState),
