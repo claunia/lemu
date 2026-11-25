@@ -403,3 +403,16 @@ scsi_md_check(uint8_t op, uint8_t key, uint8_t asc, uint8_t ascq) "opcode 0x%02x
 scsi_md_utoc(const char *what, const char *path) "U-TOC %s %s"
 scsi_md_media(bool load) "medium %d"
 scsi_md_tray(bool open) "tray open %d"
+
+# aha154x.c
+aha154x_ioport_read(uint32_t port, uint32_t val) "port %u = 0x%02x"
+aha154x_ioport_write(uint32_t port, uint32_t val) "port %u <- 0x%02x"
+aha154x_cmd(uint8_t cmd, uint8_t p0, uint8_t p1, uint8_t p2, uint8_t p3) "command 0x%02x params %02x %02x %02x %02x"
+aha154x_reset(bool hard) "hard %d"
+aha154x_irq(uint8_t intr, uint8_t pending, bool line) "intr 0x%02x pending 0x%02x line %d"
+aha154x_mbinit(uint32_t count, uint32_t addr) "%u mailboxes at 0x%06x"
+aha154x_ccb(uint32_t ccb, uint8_t op, int id, int lun, int dir, uint8_t cdb0, uint32_t len, uint32_t ptr) "ccb 0x%06x op 0x%02x target %d lun %d dir %d cdb 0x%02x len %u data 0x%06x"
+aha154x_mbi(uint32_t pos, uint32_t ccb, uint8_t code, uint8_t hs, uint8_t ts) "mbi %u ccb 0x%06x code %u host 0x%02x target 0x%02x"
+aha154x_complete(uint32_t ccb, int status, size_t resid) "ccb 0x%06x status 0x%x residual %zu"
+aha154x_bios_cmd(uint8_t op, int id, uint32_t lba, uint32_t count, uint32_t addr) "op 0x%02x target %d lba %u count %u buffer 0x%06x"
+aha154x_bios_done(uint8_t code) "code 0x%02x"

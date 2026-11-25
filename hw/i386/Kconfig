@@ -17,6 +17,7 @@ config TDX
 
 config PC
     bool
+    imply AHA154X
     imply APPLESMC
     imply HYPERV
     imply ISA_IPMI_KCS
