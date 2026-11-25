@@ -1067,6 +1067,11 @@ static void HP_B160L_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->default_ram_size = 512 * MiB;
 }
 
+/* HP-UX 11.23 c8xx SCRIPTS select a target twice. */
+static GlobalProperty hppa_astro_compat[] = {
+    { "lsi53c895a", "select-continue", "on" },
+};
+
 static void HP_C3700_machine_init_class_init(ObjectClass *oc, const void *data)
 {
     static const char * const valid_cpu_types[] = {
@@ -1081,6 +1086,8 @@ static void HP_C3700_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->init = machine_HP_C3700_init;
     mc->max_cpus = HPPA_MAX_CPUS;
     mc->default_ram_size = 1024 * MiB;
+    compat_props_add(mc->compat_props, hppa_astro_compat,
+                     G_N_ELEMENTS(hppa_astro_compat));
 }
 
 static void HP_A400_machine_init_class_init(ObjectClass *oc, const void *data)
@@ -1097,6 +1104,8 @@ static void HP_A400_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->init = machine_HP_A400_init;
     mc->max_cpus = HPPA_MAX_CPUS;
     mc->default_ram_size = 1024 * MiB;
+    compat_props_add(mc->compat_props, hppa_astro_compat,
+                     G_N_ELEMENTS(hppa_astro_compat));
 }
 
 static void HP_715_machine_init_class_init(ObjectClass *oc, const void *data)

@@ -237,8 +237,11 @@ struct LSIState {
     bool sip_until_read;
     bool reg_alias;
     bool reject_sdtr;
+    bool select_continue;
     /* An absent target was selected; report STO when the SCRIPTS resume. */
     bool sto_pending;
+    /* Connected because our own SELECT won, not because a target reselected. */
+    bool own_selection;
 
     int carry; /* ??? Should this be in a visible register somewhere?  */
     int status;
@@ -386,6 +389,7 @@ static void lsi_soft_reset(LSIState *s)
     s->msg_len = 0;
     s->waiting = LSI_NOWAIT;
     s->sto_pending = false;
+    s->own_selection = false;
     s->dsa = 0;
     s->dnad = 0;
     s->dbc = 0;
@@ -708,6 +712,7 @@ static void lsi_resume_script(LSIState *s)
 static void lsi_disconnect(LSIState *s)
 {
     s->scntl1 &= ~LSI_SCNTL1_CON;
+    s->own_selection = false;
     s->sstat1 &= ~PHASE_MASK;
     s->sbcl = 0;
 }
@@ -834,6 +839,7 @@ static void lsi_reselect(LSIState *s, lsi_request *p)
     }
     trace_lsi_reselect(id);
     s->scntl1 |= LSI_SCNTL1_CON;
+    s->own_selection = false;
     lsi_set_phase(s, PHASE_MI);
     s->msg_action = p->out ? LSI_MSG_ACTION_DOUT : LSI_MSG_ACTION_DIN;
     s->current->dma_len = p->pending;
@@ -1344,6 +1350,7 @@ again:
     case 0: /* Block move.  */
         if (s->sist1 & LSI_SIST1_STO) {
             trace_lsi_execute_script_blockmove_delayed();
+            s->own_selection = false;
             lsi_stop_script(s);
             break;
         }
@@ -1474,6 +1481,17 @@ again:
             switch (opcode) {
             case 0: /* Select */
                 s->sdid = id;
+                if (s->select_continue && s->own_selection) {
+                    /*
+                     * Once the chip wins arbitration the SCRIPTS go on while
+                     * the selection runs.  Only a selection or reselection by
+                     * another device takes the alternate address.  The HP-UX
+                     * 11.23 c8xx SCRIPTS select by ID, then again from the
+                     * table to load the transfer settings.
+                     */
+                    trace_lsi_execute_script_io_selectcontinue(id);
+                    break;
+                }
                 if (s->scntl1 & LSI_SCNTL1_CON) {
                     trace_lsi_execute_script_io_alreadyreselected();
                     s->dsp = s->dnad;
@@ -1499,6 +1517,8 @@ again:
                         return;
                     }
                     lsi_bad_selection(s, id);
+                    /* The selection runs on until the time-out stops it. */
+                    s->own_selection = s->select_continue;
                     break;
                 }
                 trace_lsi_execute_script_io_selected(id,
@@ -1508,6 +1528,7 @@ again:
                 lsi_script_scsi_interrupt(s, LSI_SIST0_CMP, 0); */
                 s->select_tag = id << 8;
                 s->scntl1 |= LSI_SCNTL1_CON;
+                s->own_selection = true;
                 if (insn & (1 << 3)) {
                     s->socl |= LSI_SOCL_ATN;
                     s->sbcl |= LSI_SBCL_ATN;
@@ -1538,6 +1559,7 @@ again:
             case 1: /* Disconnect */
                 trace_lsi_execute_script_io_disconnect();
                 s->scntl1 &= ~LSI_SCNTL1_CON;
+                s->own_selection = false;
                 /* FIXME: this is not entirely correct; the target need not ask
                  * for reselection until it has to send data, while here we force a
                  * reselection as soon as the bus is free.  The correct flow would
@@ -1704,8 +1726,15 @@ again:
                 trace_lsi_execute_script_tc_nop();
                 break;
             }
-            if (s->sist1 & LSI_SIST1_STO) {
+            /*
+             * A selection time-out stops the SCRIPTS at the next instruction
+             * that needs the target.  With select-continue only a phase
+             * compare does; jumps on data or carry go on, as on the chip.
+             */
+            if ((s->sist1 & LSI_SIST1_STO) &&
+                (!s->select_continue || (insn & (1 << 17)))) {
                 trace_lsi_execute_script_tc_delayedselect_timeout();
+                s->own_selection = false;
                 lsi_stop_script(s);
                 break;
             }
@@ -2679,6 +2708,12 @@ static const Property lsi_properties[] = {
     DEFINE_PROP_BOOL("reg-alias", LSIState, reg_alias, false),
     /* Answer SDTR with MESSAGE REJECT instead of skipping it. */
     DEFINE_PROP_BOOL("reject-sdtr", LSIState, reject_sdtr, false),
+    /*
+     * The SCRIPTS go on while a selection runs, as on the real chip: a
+     * second SELECT does not jump, and a selection time-out stops them
+     * only at the first instruction that needs the target.
+     */
+    DEFINE_PROP_BOOL("select-continue", LSIState, select_continue, false),
 };
 
 static void lsi_class_init(ObjectClass *klass, const void *data)
