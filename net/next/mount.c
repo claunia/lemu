@@ -46,8 +46,17 @@ struct mount_t {
 };
 
 
+/* The mounts DUMP lists: the guest's, so a few are enough */
+#define MNT_MAX_ENTRIES 16
+
 static void mnt_add(struct mount_t** entry, char* name, char* path) {
+    int n = 0;
+
     while (*entry) {
+        if (++n >= MNT_MAX_ENTRIES) {
+            nn_log("[RPC] Note: rmtab full, '%s' from %s not listed.\n", path, name);
+            return;
+        }
         if (strncmp((*entry)->name, name, MAXNAMELEN) || 
             strncmp((*entry)->path, path, MAXPATHLEN)) {
             entry = &(*entry)->next;
