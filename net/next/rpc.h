@@ -115,8 +115,6 @@ struct rpc_t {
     const char *name;
 };
 
-struct rpc_conn_t;
-
 struct rpc_prog_t {
     uint32_t prog;
     uint32_t vers;
@@ -127,9 +125,6 @@ struct rpc_prog_t {
     int          log;
     const char  *name;
 
-    /* the socket on the host */
-    int          fd;
-    uint16_t     local_port;
     struct rpc_t *rpc;
 
     struct rpc_prog_t *next;

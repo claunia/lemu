@@ -15,11 +15,13 @@
  *   10.0.2.3    names of these machines, in the domain "home"
  *   10.0.2.2    the time, by NTP
  *
- * The servers listen on 127.0.0.1. The filter answers ARP and ping for
- * 10.0.2.254 itself, and turns the guest's packets for the servers into
- * packets for the host (10.0.2.2) and their ports there, which the user
- * network takes to 127.0.0.1, and their answers back again. Broadcasts
- * to the port mapper go to it too.
+ * All of it is answered here, in the filter: the guest's packets for
+ * 10.0.2.254 never reach the user network, and there are no host
+ * sockets, so nothing but the guest reaches the servers. The filter
+ * answers ARP and ping for 10.0.2.254, puts the guest's fragmented
+ * packets for it together, hands UDP calls to the servers and TCP to a
+ * small TCP server of its own (tcp.c), and fragments long answers.
+ * Broadcasts to the port mapper go to it too.
  *
  * This code is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -35,7 +37,9 @@
 #include "net/net.h"
 #include "net/checksum.h"
 #include "net/eth.h"
+#include "qemu/timer.h"
 #include "rpc.h"
+#include "tcp.h"
 #include "net/filter-next.h"
 
 OBJECT_DECLARE_SIMPLE_TYPE(FilterNeXTState, FILTER_NEXT)
@@ -53,7 +57,24 @@ OBJECT_DECLARE_SIMPLE_TYPE(FilterNeXTState, FILTER_NEXT)
 #define ADDR_DNS        (CTL_NET | CTL_DNS)
 #define ADDR_SERVER     (CTL_NET | CTL_NFSD)
 
-#define FRAG_IDS        16
+#define NN_IP_MTU          1500
+/* fragmented packets for the servers being put together */
+#define REASM_SLOTS     4
+#define REASM_MAX       65535
+#define REASM_TIMEOUT_MS 30000
+
+typedef struct FilterNeXTReasm {
+    uint8_t *data;              /* the IP payload, REASM_MAX bytes */
+    uint8_t blocks[REASM_MAX / 8 / 8 + 1];    /* which 8 bytes are here */
+    uint8_t head[ETH_HLEN + 60];  /* of the first fragment */
+    size_t head_len;
+    uint32_t src;
+    uint16_t id;
+    uint8_t prot;
+    bool used;
+    size_t total;               /* the payload, once the last one is here */
+    int64_t time;
+} FilterNeXTReasm;
 
 struct FilterNeXTState {
     NetFilterState parent_obj;
@@ -66,36 +87,14 @@ struct FilterNeXTState {
 
     /* the user network's own Ethernet address */
     uint8_t net_mac[6];
-    /* fragmented answers from the servers, by IP id */
-    uint16_t frag_id[FRAG_IDS];
-    int frag_next;
+    uint16_t ip_id;
+    NNTcp *tcp;
+    FilterNeXTReasm reasm[REASM_SLOTS];
 };
 
 static bool filter_next_in_use;
 
 /* ---- packets ---- */
-
-static uint16_t csum_fold(uint32_t sum)
-{
-    while (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
-    }
-    return sum;
-}
-
-/* RFC 1624: change a checksum for one 16-bit word that changed */
-static void csum_replace16(uint8_t *csum, uint16_t old, uint16_t new)
-{
-    uint32_t sum = (uint16_t)~lduw_be_p(csum) + (uint16_t)~old + new;
-
-    stw_be_p(csum, ~csum_fold(sum));
-}
-
-static void csum_replace32(uint8_t *csum, uint32_t old, uint32_t new)
-{
-    csum_replace16(csum, old >> 16, new >> 16);
-    csum_replace16(csum, old & 0xFFFF, new & 0xFFFF);
-}
 
 static void ip_header_csum(uint8_t *ip)
 {
@@ -103,46 +102,6 @@ static void ip_header_csum(uint8_t *ip)
 
     stw_be_p(ip + 10, 0);
     stw_be_p(ip + 10, net_raw_checksum(ip, ihl));
-}
-
-/* Where the checksum of a UDP or TCP header is, or NULL for none */
-static uint8_t *l4_csum(uint8_t *l4, int prot)
-{
-    if (prot == IPPROTO_TCP) {
-        return l4 + 16;
-    }
-    return lduw_be_p(l4 + 6) ? l4 + 6 : NULL;
-}
-
-/*
- * Change the address at off (12: source, 16: destination) of an IP
- * packet, and the port of its UDP or TCP header (0: source, 2:
- * destination) if it has one here.
- */
-static void ip_rewrite(uint8_t *ip, size_t len, int addr_off, uint32_t addr,
-                       uint16_t port)
-{
-    size_t ihl = (ip[0] & 0xF) * 4;
-    uint32_t old_addr = ldl_be_p(ip + addr_off);
-    bool first = !(lduw_be_p(ip + 6) & 0x1FFF);
-    int prot = ip[9];
-
-    stl_be_p(ip + addr_off, addr);
-    ip_header_csum(ip);
-
-    if (first && (prot == IPPROTO_UDP || prot == IPPROTO_TCP) &&
-        len >= ihl + (prot == IPPROTO_TCP ? 20 : 8)) {
-        uint8_t *l4 = ip + ihl;
-        int port_off = addr_off == 12 ? 0 : 2;
-        uint8_t *csum = l4_csum(l4, prot);
-        uint16_t old_port = lduw_be_p(l4 + port_off);
-
-        stw_be_p(l4 + port_off, port);
-        if (csum) {
-            csum_replace32(csum, old_addr, addr);
-            csum_replace16(csum, old_port, port);
-        }
-    }
 }
 
 static void filter_next_send(FilterNeXTState *s, bool to_guest,
@@ -157,17 +116,50 @@ static void filter_next_send(FilterNeXTState *s, bool to_guest,
     }
 }
 
+/* Send a whole IP packet to the guest, in fragments if it is long */
+static void filter_next_send_ip(FilterNeXTState *s, uint8_t *pkt, size_t len)
+{
+    uint8_t *ip = pkt + ETH_HLEN;
+    size_t payload = len - ETH_HLEN - 20;
+    uint8_t frag[ETH_HLEN + NN_IP_MTU];
+
+    stw_be_p(ip + 4, s->ip_id++);
+    if (len - ETH_HLEN <= NN_IP_MTU) {
+        ip_header_csum(ip);
+        filter_next_send(s, true, pkt, len);
+        return;
+    }
+    for (size_t off = 0; off < payload; off += NN_IP_MTU - 20) {
+        size_t n = MIN(payload - off, NN_IP_MTU - 20);
+        uint8_t *fip = frag + ETH_HLEN;
+
+        memcpy(frag, pkt, ETH_HLEN + 20);
+        memcpy(fip + 20, ip + 20 + off, n);
+        stw_be_p(fip + 2, 20 + n);
+        stw_be_p(fip + 6, (off / 8) | (off + n < payload ? 0x2000 : 0));
+        ip_header_csum(fip);
+        filter_next_send(s, true, frag, ETH_HLEN + 20 + n);
+    }
+}
+
 /* Send a UDP packet of ours to the guest */
 static void filter_next_udp_reply(FilterNeXTState *s, const uint8_t *req,
                                   uint32_t src, uint16_t sport,
                                   const uint8_t *data, size_t len)
 {
     size_t total = ETH_HLEN + 20 + 8 + len;
-    g_autofree uint8_t *pkt = g_malloc0(total);
+    g_autofree uint8_t *pkt = NULL;
     const uint8_t *rip = req + ETH_HLEN;
     const uint8_t *rudp = rip + (rip[0] & 0xF) * 4;
-    uint8_t *ip = pkt + ETH_HLEN, *udp = ip + 20;
+    uint8_t *ip, *udp;
 
+    if (20 + 8 + len > 0xFFFF) {
+        nn_log("the answer is too long for UDP\n");
+        return;
+    }
+    pkt = g_malloc0(total);
+    ip = pkt + ETH_HLEN;
+    udp = ip + 20;
     memcpy(pkt, req + 6, 6);
     memcpy(pkt + 6, s->net_mac, 6);
     stw_be_p(pkt + 12, ETHERTYPE_IP);
@@ -181,8 +173,8 @@ static void filter_next_udp_reply(FilterNeXTState *s, const uint8_t *req,
     memcpy(udp + 2, rudp, 2);
     stw_be_p(udp + 4, 8 + len);
     memcpy(udp + 8, data, len);
-    net_checksum_calculate(pkt, total, CSUM_IP | CSUM_UDP);
-    filter_next_send(s, true, pkt, total);
+    net_checksum_calculate(pkt, total, CSUM_UDP);
+    filter_next_send_ip(s, pkt, total);
 }
 
 /* ---- ARP and ping for the servers ---- */
@@ -445,6 +437,131 @@ static bool filter_next_ntp(FilterNeXTState *s, const uint8_t *pkt,
     return true;
 }
 
+/* ---- the servers ---- */
+
+static void filter_next_tcp_send(void *opaque, uint8_t *frame, size_t len)
+{
+    filter_next_send(opaque, true, frame, len);
+}
+
+/* A whole packet for the servers' address, or a broadcast to them */
+static void filter_next_server(FilterNeXTState *s, const uint8_t *pkt,
+                               size_t len)
+{
+    const uint8_t *ip = pkt + ETH_HLEN;
+    size_t ihl = (ip[0] & 0xF) * 4;
+    size_t ip_len = lduw_be_p(ip + 2);
+    const uint8_t *udp = ip + ihl;
+    const uint8_t *reply;
+    size_t reply_len, udp_len;
+
+    switch (ip[9]) {
+    case IPPROTO_ICMP_:
+        filter_next_ping(s, pkt, len);
+        break;
+    case IPPROTO_TCP:
+        nn_tcp_input(s->tcp, pkt, len);
+        break;
+    case IPPROTO_UDP:
+        if (ip_len < ihl + 8) {
+            break;
+        }
+        udp_len = lduw_be_p(udp + 4);
+        if (udp_len < 8 || udp_len > ip_len - ihl) {
+            break;
+        }
+        if (nn_rpc_udp(lduw_be_p(udp + 2), udp + 8, udp_len - 8,
+                       &reply, &reply_len)) {
+            filter_next_udp_reply(s, pkt, ADDR_SERVER, lduw_be_p(udp + 2),
+                                  reply, reply_len);
+        }
+        break;
+    }
+}
+
+static bool reasm_block(FilterNeXTReasm *r, size_t b)
+{
+    return r->blocks[b / 8] & (1 << (b % 8));
+}
+
+/*
+ * A fragment for the servers: when it completes its packet, hand that on.
+ * Fragments that overlap simply overwrite what was there.
+ */
+static void filter_next_reasm(FilterNeXTState *s, const uint8_t *pkt)
+{
+    const uint8_t *ip = pkt + ETH_HLEN;
+    size_t ihl = (ip[0] & 0xF) * 4;
+    size_t n = lduw_be_p(ip + 2) - ihl;
+    uint16_t frag = lduw_be_p(ip + 6);
+    size_t off = (frag & 0x1FFF) * 8;
+    bool more = frag & 0x2000;
+    int64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
+    FilterNeXTReasm *r = NULL, *old = &s->reasm[0];
+    g_autofree uint8_t *whole = NULL;
+
+    if (off + n > REASM_MAX - 60 || (more && (n & 7)) || !n) {
+        return;
+    }
+    for (int i = 0; i < REASM_SLOTS; i++) {
+        FilterNeXTReasm *e = &s->reasm[i];
+
+        if (e->used && now - e->time > REASM_TIMEOUT_MS) {
+            e->used = false;
+        }
+        if (e->used && e->src == ldl_be_p(ip + 12) &&
+            e->id == lduw_be_p(ip + 4) && e->prot == ip[9]) {
+            r = e;
+            break;
+        }
+        if (!e->used || (old->used && e->time < old->time)) {
+            old = e;
+        }
+    }
+    if (!r) {
+        r = old;
+        if (!r->data) {
+            r->data = g_malloc(REASM_MAX);
+        }
+        memset(r->blocks, 0, sizeof(r->blocks));
+        r->used = true;
+        r->src = ldl_be_p(ip + 12);
+        r->id = lduw_be_p(ip + 4);
+        r->prot = ip[9];
+        r->total = 0;
+        r->head_len = 0;
+        r->time = now;
+    }
+    memcpy(r->data + off, ip + ihl, n);
+    for (size_t b = off / 8; b < (off + n + 7) / 8; b++) {
+        r->blocks[b / 8] |= 1 << (b % 8);
+    }
+    if (!more) {
+        r->total = off + n;
+    }
+    if (!off) {
+        r->head_len = ETH_HLEN + ihl;
+        memcpy(r->head, pkt, r->head_len);
+    }
+    if (!r->total || !r->head_len) {
+        return;
+    }
+    for (size_t b = 0; b < (r->total + 7) / 8; b++) {
+        if (!reasm_block(r, b)) {
+            return;
+        }
+    }
+
+    /* all here: one packet */
+    whole = g_malloc(r->head_len + r->total);
+    memcpy(whole, r->head, r->head_len);
+    memcpy(whole + r->head_len, r->data, r->total);
+    stw_be_p(whole + ETH_HLEN + 2, r->head_len - ETH_HLEN + r->total);
+    stw_be_p(whole + ETH_HLEN + 6, 0);
+    r->used = false;
+    filter_next_server(s, whole, r->head_len + r->total);
+}
+
 /* ---- the guest's packets ---- */
 
 static bool is_broadcast(uint32_t addr)
@@ -486,37 +603,21 @@ static bool filter_next_from_guest(FilterNeXTState *s, uint8_t *pkt,
     first = !(lduw_be_p(ip + 6) & 0x1FFF);
 
     if (dst == ADDR_SERVER) {
-        if (prot == IPPROTO_ICMP_) {
-            filter_next_ping(s, pkt, len);
-            return true;
-        }
-        if (first && (prot == IPPROTO_UDP || prot == IPPROTO_TCP) &&
-            ip_len >= ihl + 4) {
-            uint16_t local = nn_rpc_local_port(prot,
-                                               lduw_be_p(ip + ihl + 2));
-
-            if (!local) {
-                return true;    /* nothing listens there */
-            }
-            ip_rewrite(ip, ip_len, 16, ADDR_HOST, local);
+        /* all of it stays here */
+        if (lduw_be_p(ip + 6) & 0x3FFF) {
+            filter_next_reasm(s, pkt);
         } else {
-            ip_rewrite(ip, ip_len, 16, ADDR_HOST, 0);
+            filter_next_server(s, pkt, ETH_HLEN + ip_len);
         }
-        filter_next_send(s, false, pkt, len);
         return true;
     }
 
     if (prot != IPPROTO_UDP || !first || ip_len < ihl + 8) {
         return false;
     }
-    if (is_broadcast(dst) && lduw_be_p(ip + ihl + 2) == PORT_RPC) {
-        uint16_t local = nn_rpc_local_port(IPPROTO_UDP, PORT_RPC);
-
-        if (!local) {
-            return false;
-        }
-        ip_rewrite(ip, ip_len, 16, ADDR_HOST, local);
-        filter_next_send(s, false, pkt, len);
+    if (is_broadcast(dst) && lduw_be_p(ip + ihl + 2) == PORT_RPC &&
+        !(lduw_be_p(ip + 6) & 0x2000)) {
+        filter_next_server(s, pkt, ETH_HLEN + ip_len);
         return true;
     }
     if (dst == ADDR_DNS && lduw_be_p(ip + ihl + 2) == PORT_DNS) {
@@ -530,60 +631,17 @@ static bool filter_next_from_guest(FilterNeXTState *s, uint8_t *pkt,
 
 /* ---- the user network's packets ---- */
 
-static bool frag_known(FilterNeXTState *s, uint16_t id)
-{
-    for (int i = 0; i < FRAG_IDS; i++) {
-        if (s->frag_id[i] == id) {
-            return true;
-        }
-    }
-    return false;
-}
-
+/* Nothing from the user network is for us: only learn its address */
 static bool filter_next_from_net(FilterNeXTState *s, uint8_t *pkt,
                                  size_t len)
 {
-    uint8_t *ip = pkt + ETH_HLEN;
-    size_t ihl, ip_len;
-    uint16_t frag, guest_port;
-    int prot;
+    const uint8_t *ip = pkt + ETH_HLEN;
 
-    if (len < ETH_HLEN + 20 || lduw_be_p(pkt + 12) != ETHERTYPE_IP ||
-        (ip[0] >> 4) != 4 || ldl_be_p(ip + 12) != ADDR_HOST) {
-        return false;
+    if (len >= ETH_HLEN + 20 && lduw_be_p(pkt + 12) == ETHERTYPE_IP &&
+        (ip[0] >> 4) == 4 && ldl_be_p(ip + 12) == ADDR_HOST) {
+        memcpy(s->net_mac, pkt + 6, 6);
     }
-    memcpy(s->net_mac, pkt + 6, 6);
-    ihl = (ip[0] & 0xF) * 4;
-    ip_len = lduw_be_p(ip + 2);
-    if (ihl < 20 || ip_len < ihl || ip_len > len - ETH_HLEN) {
-        return false;
-    }
-    prot = ip[9];
-    frag = lduw_be_p(ip + 6);
-
-    if (frag & 0x1FFF) {
-        /* a later piece of a fragmented answer */
-        if (!frag_known(s, lduw_be_p(ip + 4))) {
-            return false;
-        }
-        ip_rewrite(ip, ip_len, 12, ADDR_SERVER, 0);
-        filter_next_send(s, true, pkt, len);
-        return true;
-    }
-    if ((prot != IPPROTO_UDP && prot != IPPROTO_TCP) || ip_len < ihl + 4) {
-        return false;
-    }
-    guest_port = nn_rpc_guest_port(prot, lduw_be_p(ip + ihl));
-    if (!guest_port) {
-        return false;
-    }
-    if (frag & 0x2000) {
-        s->frag_id[s->frag_next] = lduw_be_p(ip + 4);
-        s->frag_next = (s->frag_next + 1) % FRAG_IDS;
-    }
-    ip_rewrite(ip, ip_len, 12, ADDR_SERVER, guest_port);
-    filter_next_send(s, true, pkt, len);
-    return true;
+    return false;
 }
 
 static ssize_t filter_next_receive_iov(NetFilterState *nf,
@@ -645,7 +703,6 @@ static void filter_next_setup(NetFilterState *nf, Error **errp)
         return;
     }
     memcpy(s->net_mac, slirp_mac, 6);
-    memset(s->frag_id, 0xFF, sizeof(s->frag_id));
 
     memset(&nn_cfg, 0, sizeof(nn_cfg));
     copy_host_name(nn_cfg.guest_name, s->guest_name ? s->guest_name : "next",
@@ -672,14 +729,25 @@ static void filter_next_setup(NetFilterState *nf, Error **errp)
         return;
     }
     nn_rpc_start(s->share);
+    s->tcp = nn_tcp_new(s->net_mac, ADDR_SERVER, filter_next_tcp_send, s);
     filter_next_in_use = true;
 }
 
 static void filter_next_cleanup(NetFilterState *nf)
 {
+    FilterNeXTState *s = FILTER_NEXT(nf);
+
     if (filter_next_in_use) {
+        /* the connections hold the servers' programs */
+        nn_tcp_free(s->tcp);
+        s->tcp = NULL;
         nn_rpc_stop();
         filter_next_in_use = false;
+    }
+    for (int i = 0; i < REASM_SLOTS; i++) {
+        g_free(s->reasm[i].data);
+        s->reasm[i].data = NULL;
+        s->reasm[i].used = false;
     }
 }
 

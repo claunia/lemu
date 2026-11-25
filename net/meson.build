@@ -50,6 +50,7 @@ system_ss.add(when: [slirp, 'CONFIG_NEXTCUBE'], if_true: files(
   'next/nfs.c',
   'next/portmap.c',
   'next/rpc.c',
+  'next/tcp.c',
   'next/vfs.c',
   'next/xdr.c',
 ))

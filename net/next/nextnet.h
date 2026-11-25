@@ -74,10 +74,24 @@ extern NeXTNetConfig nn_cfg;
 
 void nn_log(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
 
-/* Ports the servers listen on, on the host */
-uint16_t nn_rpc_local_port(int prot, uint16_t port);
-/* The port the guest sees, for a host port of the servers, or 0 */
-uint16_t nn_rpc_guest_port(int prot, uint16_t local);
+/* Is a program of the servers at this port? */
+bool nn_rpc_has_port(int prot, uint16_t port);
+/* Answer a UDP call; the reply stays in *reply until the next call */
+bool nn_rpc_udp(uint16_t port, const uint8_t *data, size_t len,
+                const uint8_t **reply, size_t *reply_len);
+
+/* A TCP connection to a program: its bytes in, its replies out */
+struct nn_rpc_stream;
+struct nn_rpc_stream *nn_rpc_stream_new(uint16_t port);
+/*
+ * Replies go to out until it holds NN_RPC_STREAM_QUEUE bytes; the other
+ * calls wait for the next call, which may have no data. false when the
+ * connection must close.
+ */
+#define NN_RPC_STREAM_QUEUE (1024 * 1024)
+bool nn_rpc_stream_input(struct nn_rpc_stream *st, const uint8_t *data,
+                         size_t len, GByteArray *out);
+void nn_rpc_stream_free(struct nn_rpc_stream *st);
 
 bool nn_rpc_start(const char *share);
 void nn_rpc_stop(void);

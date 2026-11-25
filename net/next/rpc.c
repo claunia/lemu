@@ -23,14 +23,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  *
- * In Previous each server has threads blocking on its sockets. Here the
- * sockets are on 127.0.0.1 and QEMU's main loop reads them; the guest
- * reaches them through the user network, which the NeXT filter points
- * at them.
+ * In Previous each server has threads blocking on its sockets. Here
+ * there are no sockets: the NeXT filter takes the guest's packets for
+ * the servers and hands their calls here, so nothing outside the guest
+ * reaches them.
  */
 
 #include "nextnet.h"
-#include "qemu/main-loop.h"
 #include "qemu/log.h"
 
 #include "rpc.h"
@@ -72,20 +71,10 @@ static const struct rpc_prog_t rpc_nfs_table_template[] = {
     { NFSPROG,       NFSVERS,       IPPROTO_TCP, PORT_NFS, nfs_prog,       1, "NFS" },
 };
 
-/* A TCP connection: RPC messages come in records */
-struct rpc_conn_t {
-    int fd;
-    struct rpc_prog_t *prog;
-    uint8_t *buf;
-    size_t len;
-    QLIST_ENTRY(rpc_conn_t) next;
-};
-
 static struct rpc_t *rpc_server;
 static struct xdr_t *rpc_in;
 static struct xdr_t *rpc_out;
 static uint32_t rpc_out_capacity;
-static QLIST_HEAD(, rpc_conn_t) rpc_conns = QLIST_HEAD_INITIALIZER(rpc_conns);
 
 int rpc_match_prog(struct rpc_t *rpc, struct rpc_prog_t *prog)
 {
@@ -265,7 +254,7 @@ static void rpc_out_reset(size_t out_room)
     rpc_out->error = false;
 }
 
-static void rpc_xdr_reset(uint8_t *data, uint32_t len, size_t out_room)
+static void rpc_xdr_reset(const uint8_t *data, uint32_t len, size_t out_room)
 {
     memcpy(rpc_in->head, data, len);
     rpc_in->data = rpc_in->head;
@@ -279,85 +268,84 @@ int proc_null(struct rpc_t *rpc)
     return RPC_SUCCESS;
 }
 
-/* ---- sockets ---- */
+/* ---- calls from the NeXT filter ---- */
 
-static int rpc_socket(int type, uint16_t *port)
+/* The ports of the programs the guest finds by the port mapper */
+#define RPC_FIRST_PORT 600
+
+/* A TCP connection: RPC messages come in records */
+struct nn_rpc_stream {
+    struct rpc_prog_t *prog;
+    uint8_t *buf;
+    size_t len;
+};
+
+static uint16_t rpc_next_port = RPC_FIRST_PORT;
+
+static struct rpc_prog_t *rpc_find(int prot, uint16_t port)
 {
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
-    };
-    socklen_t len = sizeof(addr);
-    int fd = qemu_socket(AF_INET, type, 0);
+    struct rpc_prog_t *prog = rpc_server ? rpc_server->prog_list : NULL;
 
-    if (fd < 0) {
-        return -1;
-    }
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
-        getsockname(fd, (struct sockaddr *)&addr, &len) < 0 ||
-        (type == SOCK_STREAM && listen(fd, 16) < 0)) {
-        close(fd);
-        return -1;
-    }
-    qemu_set_blocking(fd, false, NULL);
-    *port = ntohs(addr.sin_port);
-    return fd;
-}
-
-static void rpc_udp_read(void *opaque)
-{
-    struct rpc_prog_t *prog = opaque;
-    struct sockaddr_in from;
-    socklen_t fromlen = sizeof(from);
-    ssize_t n;
-
-    n = recvfrom(prog->fd, (char *)rpc_in->head, rpc_in->capacity, 0,
-                 (struct sockaddr *)&from, &fromlen);
-    if (n <= 0) {
-        return;
-    }
-    rpc_in->data = rpc_in->head;
-    rpc_in->size = n;
-    rpc_out_reset(0);
-    if (rpc_input(prog)) {
-        sendto(prog->fd, (const char *)rpc_out->head, rpc_out->size, 0,
-               (struct sockaddr *)&from, fromlen);
-    }
-}
-
-static void rpc_conn_close(struct rpc_conn_t *conn)
-{
-    qemu_set_fd_handler(conn->fd, NULL, NULL, NULL);
-    close(conn->fd);
-    QLIST_REMOVE(conn, next);
-    g_free(conn->buf);
-    g_free(conn);
-}
-
-static void rpc_conn_send(int fd, const uint8_t *data, size_t len)
-{
-    while (len) {
-        ssize_t n = send(fd, (const char *)data, len, 0);
-
-        if (n < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                g_usleep(100);
-                continue;
-            }
-            return;
+    for (; prog; prog = prog->next) {
+        if (prog->prot == prot && prog->port == port) {
+            return prog;
         }
-        data += n;
-        len -= n;
+    }
+    return NULL;
+}
+
+bool nn_rpc_has_port(int prot, uint16_t port)
+{
+    return rpc_find(prot, port) != NULL;
+}
+
+bool nn_rpc_udp(uint16_t port, const uint8_t *data, size_t len,
+                const uint8_t **reply, size_t *reply_len)
+{
+    struct rpc_prog_t *prog = rpc_find(IPPROTO_UDP, port);
+
+    if (!prog || len > rpc_in->capacity) {
+        return false;
+    }
+    rpc_xdr_reset(data, len, 0);
+    if (!rpc_input(prog)) {
+        return false;
+    }
+    *reply = rpc_out->head;
+    *reply_len = rpc_out->size;
+    return true;
+}
+
+struct nn_rpc_stream *nn_rpc_stream_new(uint16_t port)
+{
+    struct rpc_prog_t *prog = rpc_find(IPPROTO_TCP, port);
+    struct nn_rpc_stream *st;
+
+    if (!prog) {
+        return NULL;
+    }
+    st = g_new0(struct nn_rpc_stream, 1);
+    st->prog = prog;
+    return st;
+}
+
+void nn_rpc_stream_free(struct nn_rpc_stream *st)
+{
+    if (st) {
+        g_free(st->buf);
+        g_free(st);
     }
 }
 
 /*
  * Each record has fragments, each with a 4-byte mark: the last one has
- * bit 31 set, and the other bits give its length.
+ * bit 31 set, and the other bits give its length. The replies, as
+ * records, go to out.
  */
-static void rpc_conn_messages(struct rpc_conn_t *conn)
+static void rpc_stream_messages(struct nn_rpc_stream *st, GByteArray *out)
 {
-    for (;;) {
+    /* when the guest is slow to take the replies, the rest waits */
+    while (out->len < NN_RPC_STREAM_QUEUE) {
         size_t off = 0, msg_len = 0;
         bool last = false;
         g_autofree uint8_t *msg = NULL;
@@ -366,13 +354,13 @@ static void rpc_conn_messages(struct rpc_conn_t *conn)
         while (!last) {
             uint32_t mark;
 
-            if (conn->len < off + 4) {
+            if (st->len < off + 4) {
                 return;
             }
-            mark = ldl_be_p(conn->buf + off);
+            mark = ldl_be_p(st->buf + off);
             last = mark & 0x80000000u;
             mark &= 0x7FFFFFFFu;
-            if (conn->len < off + 4 + mark) {
+            if (st->len - off - 4 < mark) {
                 return;
             }
             off += 4 + mark;
@@ -383,63 +371,38 @@ static void rpc_conn_messages(struct rpc_conn_t *conn)
         msg = g_malloc(msg_len ? msg_len : 1);
         msg_len = 0;
         for (size_t p = 0; p < off;) {
-            uint32_t mark = ldl_be_p(conn->buf + p) & 0x7FFFFFFFu;
+            uint32_t mark = ldl_be_p(st->buf + p) & 0x7FFFFFFFu;
 
-            memcpy(msg + msg_len, conn->buf + p + 4, mark);
+            memcpy(msg + msg_len, st->buf + p + 4, mark);
             msg_len += mark;
             p += 4 + mark;
         }
-        memmove(conn->buf, conn->buf + off, conn->len - off);
-        conn->len -= off;
+        memmove(st->buf, st->buf + off, st->len - off);
+        st->len -= off;
 
         rpc_xdr_reset(msg, msg_len, 4);
-        if (rpc_input(conn->prog)) {
+        if (rpc_input(st->prog)) {
             stl_be_p(rpc_out->head, 0x80000000u | rpc_out->size);
-            rpc_conn_send(conn->fd, rpc_out->head, rpc_out->size + 4);
+            g_byte_array_append(out, rpc_out->head, rpc_out->size + 4);
         }
     }
 }
 
-static void rpc_conn_read(void *opaque)
+bool nn_rpc_stream_input(struct nn_rpc_stream *st, const uint8_t *data,
+                         size_t len, GByteArray *out)
 {
-    struct rpc_conn_t *conn = opaque;
-    uint8_t chunk[16384];
-    ssize_t n = recv(conn->fd, (char *)chunk, sizeof(chunk), 0);
-
-    if (n == 0 || (n < 0 && errno != EAGAIN &&
-                   errno != EWOULDBLOCK)) {
-        rpc_conn_close(conn);
-        return;
-    }
-    if (n < 0) {
-        return;
-    }
-    if (conn->len + n > MAX_RECORD) {
+    /* the whole record must fit in rpc_in */
+    if (len > MAX_RECORD - st->len) {
         nn_log("RPC: record too long\n");
-        rpc_conn_close(conn);
-        return;
+        return false;
     }
-    conn->buf = g_realloc(conn->buf, conn->len + n);
-    memcpy(conn->buf + conn->len, chunk, n);
-    conn->len += n;
-    rpc_conn_messages(conn);
-}
-
-static void rpc_tcp_accept(void *opaque)
-{
-    struct rpc_prog_t *prog = opaque;
-    struct rpc_conn_t *conn;
-    int fd = qemu_accept(prog->fd, NULL, NULL);
-
-    if (fd < 0) {
-        return;
+    if (len) {
+        st->buf = g_realloc(st->buf, st->len + len);
+        memcpy(st->buf + st->len, data, len);
+        st->len += len;
     }
-    qemu_set_blocking(fd, false, NULL);
-    conn = g_new0(struct rpc_conn_t, 1);
-    conn->fd = fd;
-    conn->prog = prog;
-    QLIST_INSERT_HEAD(&rpc_conns, conn, next);
-    qemu_set_fd_handler(fd, rpc_conn_read, NULL, conn);
+    rpc_stream_messages(st, out);
+    return true;
 }
 
 void rpc_add_program(struct rpc_t *rpc, struct rpc_prog_t *prog)
@@ -448,19 +411,11 @@ void rpc_add_program(struct rpc_t *rpc, struct rpc_prog_t *prog)
     bool tcp = prog->prot == IPPROTO_TCP;
 
     prog->rpc = rpc;
-    prog->fd = rpc_socket(tcp ? SOCK_STREAM : SOCK_DGRAM, &prog->local_port);
-    if (prog->fd < 0) {
-        nn_log("RPC: %s could not start\n", prog->name);
-        g_free(prog);
-        return;
-    }
     if (prog->port == 0) {
-        prog->port = prog->local_port;
+        prog->port = rpc_next_port++;
     }
-    qemu_set_fd_handler(prog->fd, tcp ? rpc_tcp_accept : rpc_udp_read,
-                        NULL, prog);
-    nn_log("RPC: %s started (%s: %d -> %d)\n", prog->name,
-           tcp ? "TCP" : "UDP", prog->port, prog->local_port);
+    nn_log("RPC: %s started (%s: %d)\n", prog->name,
+           tcp ? "TCP" : "UDP", prog->port);
 
     while (*entry) {
         entry = &(*entry)->next;
@@ -471,43 +426,13 @@ void rpc_add_program(struct rpc_t *rpc, struct rpc_prog_t *prog)
 
 static void rpc_remove_all_programs(struct rpc_t *rpc)
 {
-    struct rpc_conn_t *conn, *next_conn;
-
-    QLIST_FOREACH_SAFE(conn, &rpc_conns, next, next_conn) {
-        rpc_conn_close(conn);
-    }
     while (rpc->prog_list) {
         struct rpc_prog_t *next = rpc->prog_list->next;
 
-        qemu_set_fd_handler(rpc->prog_list->fd, NULL, NULL, NULL);
-        close(rpc->prog_list->fd);
         g_free(rpc->prog_list);
         rpc->prog_list = next;
     }
-}
-
-uint16_t nn_rpc_local_port(int prot, uint16_t port)
-{
-    struct rpc_prog_t *prog = rpc_server ? rpc_server->prog_list : NULL;
-
-    for (; prog; prog = prog->next) {
-        if (prog->prot == prot && prog->port == port) {
-            return prog->local_port;
-        }
-    }
-    return 0;
-}
-
-uint16_t nn_rpc_guest_port(int prot, uint16_t local)
-{
-    struct rpc_prog_t *prog = rpc_server ? rpc_server->prog_list : NULL;
-
-    for (; prog; prog = prog->next) {
-        if (prog->prot == prot && prog->local_port == local) {
-            return prog->port;
-        }
-    }
-    return 0;
+    rpc_next_port = RPC_FIRST_PORT;
 }
 
 static void rpc_add_table(struct rpc_t *rpc, const struct rpc_prog_t *table,
