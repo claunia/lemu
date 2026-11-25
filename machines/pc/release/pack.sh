@@ -2,24 +2,27 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Pack a PC kit: the disks and firmware from VMDIR, run.sh, run.cmd and
 # README.txt from ../GUEST, the binaries from BINDIR
-# usage: pack.sh nt351|aix13|aix13tcf|dellunix VMDIR BINDIR OUT.tar.lz
+# usage: pack.sh nt31|nt351|nt40|aix13|aix13tcf|dellunix VMDIR BINDIR OUT.tar.lz
 #   VMDIR   holds disk/DISK.qcow2 for each disk of the guest (GUEST.qcow2;
 #           aix13tcf: site1.qcow2 and site2.qcow2) and fw/928-n9.bin, for
 #           nt351 also fw/bios-nt351.bin (dellunix: fw/s3t64vp.bin only, the
-#           S3 Trio64V+ video BIOS); it is only read
+#           S3 Trio64V+ video BIOS; nt31: fw/bios-nt31.bin too; nt40: no fw/);
+#           it is only read
 #   BINDIR  STAGE/i386 of ../../release/stage.sh
-# nt351 makes nt351x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3),
+# nt31 makes nt31x86-lemu, nt351 nt351x86-lemu, nt40 nt40x86-lemu, aix13 makes aix13ps2-lemu (AIX PS/2 1.3),
 # aix13tcf makes aix13ps2-tcf-lemu (two AIX PS/2 1.3 VMs as a TCF cluster),
 # dellunix makes dellunix22-lemu (Dell UNIX SVR4 Issue 2.2).
 set -e
-[ $# -eq 4 ] || { echo "usage: $0 nt351|aix13|aix13tcf|dellunix VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
+[ $# -eq 4 ] || { echo "usage: $0 nt31|nt351|nt40|aix13|aix13tcf|dellunix VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../../.." && pwd)
 g=$1 vm=$2 bin=$3
 # disks: VMDIR/disk/DISK.qcow2 each; fw: files from VMDIR/fw;
 # roms: files from pc-bios that QEMU looks up by name
 case $g in
+nt31) k=nt31x86-lemu disks=nt31 fw="bios-nt31.bin 928-n9.bin" roms= ;;
 nt351) k=nt351x86-lemu disks=nt351 fw="bios-nt351.bin 928-n9.bin" roms= ;;
+nt40) k=nt40x86-lemu disks=nt40 fw= roms="bios-256k.bin vgabios-cirrus.bin efi-pcnet.rom" ;;
 aix13) k=aix13ps2-lemu disks=aix13 fw=928-n9.bin roms=bios-256k.bin ;;
 aix13tcf) k=aix13ps2-tcf-lemu disks="site1 site2" fw=928-n9.bin roms=bios-256k.bin ;;
 dellunix) k=dellunix22-lemu disks=dellunix fw=s3t64vp.bin roms=bios-256k.bin ;;
