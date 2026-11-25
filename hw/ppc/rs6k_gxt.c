@@ -15,10 +15,11 @@
  * and 1 during vertical blank; writing 0-0x3c queues command words. 0xd0
  * reads 0x80000 while the FIFO is empty, with the same vertical blank bit.
  * 0x40 is the mode: 1-bit image source in bit 0, transparency in bit 3, the
- * raster op in 0x4c enabled by bit 4, pattern fill in bit 24. 0x44 and
- * 0x48 hold the foreground and background colours, 0x50 the plane mask. Four
- * clip rectangles sit at 0x5c-0x78 as min, max pairs (x << 16 | y,
- * inclusive), each with two bits in 0x7c: 3 draws only inside, 2 never.
+ * raster op in 0x4c enabled by bit 4, screen coordinates in bit 16, pattern
+ * fill in bit 24. 0x44 and 0x48 hold the foreground and background colours,
+ * 0x50 the plane mask. Four clip rectangles sit at 0x5c-0x78 as min, max
+ * pairs (x << 16 | y on the screen, inclusive), each with two bits in 0x7c:
+ * 3 draws only inside, 2 never.
  * 0x100-0x11c hold a 16x16 pattern. Reading 0xb8 returns and clears the
  * pending interrupts: vertical retrace 0x10000, fetch done 0x20000 (the last
  * word of a command taken), idle 0x40000. Writing it sets their enables in
@@ -31,15 +32,16 @@
  *
  * Command words have bit 31 set, the opcode in bits 24-31 and a count in
  * the low half; 0xffff makes the argument list run until 0xd4 is written.
- * 0x80 points, 0x82 polyline and 0x84 segments (vertices x << 16 | y from
- * the origin at 0x80), 0x86 rectangles (x << 16 | y, h << 16 | w), 0x87
- * triangles and 0x88 quadrilaterals (vertices from the origin), 0x8d
- * images (x << 16 | y, h << 16 | w, pixels skipped per row left << 16 |
- * right, then count blocks of rows side by side) and 0xa0 copies (source,
- * destination, h << 16 | w). 0x81, 0x83 and 0x85 are points, polyline and
- * segments with a colour before each point, vertex or segment; 0xa1 draws
- * lines from Bresenham terms (k1, k2, e, start, end). 0x11 loads its
- * arguments into the registers from 0x44 on.
+ * Positions are x << 16 | y from the origin at 0x80, the place of the
+ * window drawn in, or on the screen while mode bit 16 is set. 0x80 points,
+ * 0x82 polyline and 0x84 segments, 0x86 rectangles (position, h << 16 | w),
+ * 0x87 triangles and 0x88 quadrilaterals, 0x8d images (position, h << 16 |
+ * w, pixels skipped per row left << 16 | right, then count blocks of rows
+ * side by side) and 0xa0 copies (source, destination, h << 16 | w). 0x81,
+ * 0x83 and 0x85 are points, polyline and segments with a colour before each
+ * point, vertex or segment; 0xa1 draws lines from Bresenham terms (k1, k2,
+ * e, start, end). 0x11 loads its arguments into the registers from 0x44 on.
+ * A span fill's address gives its place on the screen, its data the width.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -109,6 +111,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(GxtState, RS6K_GXT)
 #define MODE_TRANSPARENT 0x00000008
 #define MODE_ROP        0x00000010
 #define MODE_1BIT       0x00000001
+#define MODE_SCREEN     0x00010000
 #define MODE_STIPPLE    0x01000000
 #define MODE_DEST       0x00000380
 #define MODE_DEST_SHIFT 7
@@ -447,6 +450,21 @@ static int coord_y(uint32_t v)
 }
 
 /*
+ * A position from the origin register, the place of the window drawn in,
+ * or on the screen while the mode says so. AIX's X server clears that
+ * bit for lines, points and polygons, and for some rectangle fills.
+ */
+static void gxt_pos(GxtState *s, uint32_t v, int *x, int *y)
+{
+    *x = coord_x(v);
+    *y = coord_y(v);
+    if (!(reg(s, REG_MODE) & MODE_SCREEN)) {
+        *x += coord_x(reg(s, REG_ORIGIN));
+        *y += coord_y(reg(s, REG_ORIGIN));
+    }
+}
+
+/*
  * Four clip rectangles (min, max pairs), each with a 2-bit field in
  * REG_CLIP_ON: the pixel must be in one of the enabled inside rectangles,
  * if any, and in none of the enabled outside ones. And under the mask in
@@ -561,9 +579,9 @@ static void gxt_span(GxtState *s, int x0, int x1, int y)
     }
 }
 
-static void gxt_fill(GxtState *s, uint32_t pos, uint32_t size)
+/* A rectangle of h << 16 | w pixels at x, y on the screen */
+static void gxt_fill(GxtState *s, int x, int y, uint32_t size)
 {
-    int x = coord_x(pos), y = coord_y(pos);
     int y1 = MIN(y + (int)(size >> 16), GXT_LINES);
 
     for (int j = MAX(y, 0); j < y1; j++) {
@@ -574,12 +592,13 @@ static void gxt_fill(GxtState *s, uint32_t pos, uint32_t size)
 
 static void gxt_copy(GxtState *s, uint32_t src, uint32_t dst, uint32_t size)
 {
-    int sx = coord_x(src), sy = coord_y(src);
-    int dx = coord_x(dst), dy = coord_y(dst);
+    int sx, sy, dx, dy, xstep, ystep;
     int w = MIN(size & 0xffff, GXT_PITCH), h = MIN(size >> 16, GXT_LINES);
-    int ystep = dy > sy ? -1 : 1;
-    int xstep = dx > sx ? -1 : 1;
 
+    gxt_pos(s, src, &sx, &sy);
+    gxt_pos(s, dst, &dx, &dy);
+    ystep = dy > sy ? -1 : 1;
+    xstep = dx > sx ? -1 : 1;
     for (int j = 0, y = ystep > 0 ? 0 : h - 1; j < h; j++, y += ystep) {
         for (int i = 0, x = xstep > 0 ? 0 : w - 1; i < w; i++, x += xstep) {
             if (sx + x < 0 || sy + y < 0 || sx + x >= GXT_PITCH ||
@@ -649,13 +668,6 @@ static void gxt_line(GxtState *s, int x0, int y0, int x1, int y1, uint8_t c)
     }
 }
 
-/* Line commands take their vertices relative to the origin register */
-static void gxt_vertex(GxtState *s, uint32_t v, int *x, int *y)
-{
-    *x = coord_x(v) + coord_x(reg(s, REG_ORIGIN));
-    *y = coord_y(v) + coord_y(reg(s, REG_ORIGIN));
-}
-
 /* floor(a / b) for b > 0 */
 static int64_t floor_div(int64_t a, int64_t b)
 {
@@ -674,7 +686,7 @@ static void gxt_polygon(GxtState *s, int n)
     int64_t area = 0;
 
     for (int i = 0; i < n; i++) {
-        gxt_vertex(s, s->arg[i], &x[i], &y[i]);
+        gxt_pos(s, s->arg[i], &x[i], &y[i]);
         ymin = MIN(ymin, y[i]);
         ymax = MAX(ymax, y[i]);
     }
@@ -720,7 +732,7 @@ static unsigned expand_bpp(GxtState *s)
 
 static void gxt_image(GxtState *s, uint32_t data)
 {
-    int x = coord_x(s->arg[0]), y = coord_y(s->arg[0]);
+    int x, y;
     unsigned w = s->arg[1] & 0xffff, h = s->arg[1] >> 16;
     unsigned lskip = s->arg[2] >> 16, rskip = s->arg[2] & 0xffff;
     unsigned vis = w - MIN(lskip + rskip, w), bpp = expand_bpp(s);
@@ -728,6 +740,7 @@ static void gxt_image(GxtState *s, uint32_t data)
     bool opaque = !(reg(s, REG_MODE) & MODE_TRANSPARENT);
     uint8_t fg = reg(s, REG_FG), bg = reg(s, REG_BG);
 
+    gxt_pos(s, s->arg[0], &x, &y);
     for (int i = 32 - bpp; i >= 0 && bit < w * h * bpp; i -= bpp, bit += bpp) {
         unsigned pix = bit / bpp, col = pix % w;
         uint8_t v = data >> i & ((1 << bpp) - 1);
@@ -765,7 +778,8 @@ static void gxt_arg(GxtState *s, uint32_t val)
     switch (op) {
     case CMD_FILL:
         if (s->nargs == 2) {
-            gxt_fill(s, s->arg[0], s->arg[1]);
+            gxt_pos(s, s->arg[0], &x, &y);
+            gxt_fill(s, x, y, s->arg[1]);
             s->nargs = 0;
             gxt_next(s);
         }
@@ -786,12 +800,12 @@ static void gxt_arg(GxtState *s, uint32_t val)
         }
         return;
     case CMD_POINTS:
-        gxt_vertex(s, val, &x, &y);
+        gxt_pos(s, val, &x, &y);
         gxt_pset(s, x, y, reg(s, REG_FG));
         gxt_dirty(s, y, 1);
         break;
     case CMD_POLYLINE:
-        gxt_vertex(s, val, &x, &y);
+        gxt_pos(s, val, &x, &y);
         if (s->nargs > 1) {
             gxt_line(s, s->x, s->y, x, y, reg(s, REG_FG));
         }
@@ -799,7 +813,7 @@ static void gxt_arg(GxtState *s, uint32_t val)
         s->y = y;
         break;
     case CMD_SEGMENTS:
-        gxt_vertex(s, val, &x, &y);
+        gxt_pos(s, val, &x, &y);
         if (s->nargs % 2 == 0) {
             gxt_line(s, s->x, s->y, x, y, reg(s, REG_FG));
         }
@@ -815,7 +829,7 @@ static void gxt_arg(GxtState *s, uint32_t val)
             s->colour = val;
             return;
         }
-        gxt_vertex(s, val, &x, &y);
+        gxt_pos(s, val, &x, &y);
         if (s->nargs > 2) {
             gxt_line(s, s->x, s->y, x, y, s->colour);
         }
@@ -827,7 +841,7 @@ static void gxt_arg(GxtState *s, uint32_t val)
         return;
     case CMD_POINTS_C:
         if (s->nargs == 2) {
-            gxt_vertex(s, s->arg[1], &x, &y);
+            gxt_pos(s, s->arg[1], &x, &y);
             gxt_pset(s, x, y, s->arg[0]);
             gxt_dirty(s, y, 1);
             s->nargs = 0;
@@ -836,8 +850,8 @@ static void gxt_arg(GxtState *s, uint32_t val)
         return;
     case CMD_SEGMENTS_C:
         if (s->nargs == 3) {
-            gxt_vertex(s, s->arg[1], &s->x, &s->y);
-            gxt_vertex(s, s->arg[2], &x, &y);
+            gxt_pos(s, s->arg[1], &s->x, &s->y);
+            gxt_pos(s, s->arg[2], &x, &y);
             gxt_line(s, s->x, s->y, x, y, s->arg[0]);
             s->nargs = 0;
             gxt_next(s);
@@ -845,8 +859,8 @@ static void gxt_arg(GxtState *s, uint32_t val)
         return;
     case CMD_LINE:
         if (s->nargs == 5) {
-            gxt_vertex(s, s->arg[3], &s->x, &s->y);
-            gxt_vertex(s, s->arg[4], &x, &y);
+            gxt_pos(s, s->arg[3], &s->x, &s->y);
+            gxt_pos(s, s->arg[4], &x, &y);
             gxt_bresenham(s, s->x, s->y, x, y, s->arg[0], s->arg[1],
                           s->arg[2], reg(s, REG_FG));
             s->nargs = 0;
@@ -1062,10 +1076,10 @@ static void gxt_span_write(void *opaque, hwaddr addr, uint64_t val,
                            unsigned size)
 {
     GxtState *s = opaque;
-    uint32_t pos = (addr >> 2 & 0x7ff) << 16 | addr >> 13;
 
+    /* the place is on the screen, whatever the mode */
     trace_rs6k_gxt_mem_write(GXT_SPAN + addr, size, val);
-    gxt_fill(s, pos, 1 << 16 | (val & 0xffff));
+    gxt_fill(s, addr >> 2 & 0x7ff, addr >> 13, 1 << 16 | (val & 0xffff));
 }
 
 static const MemoryRegionOps gxt_span_ops = {

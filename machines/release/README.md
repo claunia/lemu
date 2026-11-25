@@ -15,7 +15,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-ppc | aos40amigaone | `../amigaone/release/mkrelease.sh` |
 | qemu-system-ppc | aos41sam440ep | `../sam440ep/release/mkrelease.sh` |
 | qemu-system-ppc | aos41pegasos2, morphos321pegasos2 | `../pegasos2/release/mkrelease.sh` |
-| qemu-system-ppc64 | aix53pseries, aix61pseries, aix71pseries, aix72pseries | `../pseries/release/mkrelease.sh` |
+| qemu-system-ppc64 | aix53pseries, aix61pseries, aix71pseries, aix72pseries, aix73pseries | `../pseries/release/mkrelease.sh` |
 | qemu-system-alpha | nt31axp, nt351axp, nt40axp, vms15axp | `../jensen/release/pack.sh` |
 | qemu-system-mips64el | nt31mips, nt351-jazz, nt351-rm200, nt4-jazz, nt4-rm200, nt4-rm200-smp, nt4srv-rm300-smp4 | `../rm200/release/pack.sh` |
 | qemu-system-mips64 | sinixn545 | `../rm200/release/pack.sh` |

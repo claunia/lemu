@@ -478,7 +478,8 @@ static bool esp_cdb_ready(ESPState *s)
         cdblen = 10;
     }
 
-    return len >= cdblen;
+    /* The IDENTIFY and other message bytes before the CDB don't count */
+    return len - s->cmdfifo_cdb_offset >= cdblen;
 }
 
 static void esp_dma_ti_check(ESPState *s)
@@ -1130,6 +1131,8 @@ static void esp_soft_reset(ESPState *s)
 static void esp_bus_reset(ESPState *s)
 {
     bus_cold_reset(BUS(&s->bus));
+    /* A bus reset disconnects every device: back to disconnected mode */
+    s->asc_mode = ESP_ASC_MODE_DIS;
 }
 
 static void parent_esp_reset(ESPState *s, int irq, int level)
