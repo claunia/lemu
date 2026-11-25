@@ -153,6 +153,13 @@ static int get_path(struct ft_t* ft, struct xdr_t* m_in, struct path_t* path) {
     return check_file(ft, path, 0);
 }
 
+/* What read_path() reads the name for */
+enum {
+    PATH_EXISTS = 0,    /* to act on it: remove, rmdir, rename */
+    PATH_NEW    = 1,    /* to make it */
+    PATH_LOOKUP = 2,    /* to find it, '.' and '..' too */
+};
+
 static int read_path(struct ft_t* ft, struct xdr_t* m_in, struct path_t* path, int create) {
     char vfs_path[MAXPATHLEN];
     
@@ -172,13 +179,18 @@ static int read_path(struct ft_t* ft, struct xdr_t* m_in, struct path_t* path, i
     if (strchr(vfs_path, '/') || memchr(vfs_path, '\0', len)) {
         return NFSERR_ACCES;
     }
+    /* '.' and '..' are the folder or its parent: only to look up */
+    if (create != PATH_LOOKUP &&
+        (!strcmp(vfs_path, ".") || !strcmp(vfs_path, ".."))) {
+        return create == PATH_NEW ? NFSERR_EXIST : NFSERR_ACCES;
+    }
     if (vfs_join(path->vfs, vfs_path, sizeof(path->vfs)) >= sizeof(path->vfs)) {
         return NFSERR_NAMETOOLONG;
     }
     if (vfs_to_host_path(ft->vfs, path) >= (int)sizeof(path->host)) {
         return NFSERR_NAMETOOLONG;
     }
-    return create ? NFS_OK : check_file(ft, path, 0);
+    return create != PATH_EXISTS ? NFS_OK : check_file(ft, path, 0);
 }
 
 
@@ -364,7 +376,7 @@ static int proc_lookup(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path, PATH_LOOKUP)) < 0) return RPC_GARBAGE_ARGS;
     
     if (status == NFS_OK) {
         status = check_file(rpc->ft, &path, 1);
@@ -504,7 +516,7 @@ static int proc_create(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path, PATH_NEW)) < 0) return RPC_GARBAGE_ARGS;
     if (read_sattr(m_in, &sattr) < 0) return RPC_GARBAGE_ARGS;
     
     if (status == NFS_OK) {
@@ -546,7 +558,7 @@ static int proc_remove(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path, 0)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path, PATH_EXISTS)) < 0) return RPC_GARBAGE_ARGS;
     
     if (status == NFS_OK) {
         fhandle = ft_get_fhandle(rpc->ft, &path);
@@ -569,8 +581,8 @@ static int proc_rename(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path_from, 0)) < 0) return RPC_GARBAGE_ARGS;
-    if ((status_to = read_path(rpc->ft, m_in, &path_to, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path_from, PATH_EXISTS)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status_to = read_path(rpc->ft, m_in, &path_to, PATH_NEW)) < 0) return RPC_GARBAGE_ARGS;
         
     if (status == NFS_OK) {
         if (status_to == NFS_OK) {
@@ -597,7 +609,7 @@ static int proc_link(struct rpc_t* rpc) {
     struct xdr_t* m_out = rpc->m_out;
     
     if ((status = get_path(rpc->ft, m_in, &path_from)) < 0) return RPC_GARBAGE_ARGS;
-    if ((status_to = read_path(rpc->ft, m_in, &path_to, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status_to = read_path(rpc->ft, m_in, &path_to, PATH_NEW)) < 0) return RPC_GARBAGE_ARGS;
     
     if (status == NFS_OK) {
         if (status_to == NFS_OK) {
@@ -621,7 +633,7 @@ static int proc_symlink(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path_to, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path_to, PATH_NEW)) < 0) return RPC_GARBAGE_ARGS;
     if (xdr_read_string(m_in, path_from.vfs, sizeof(path_from.vfs)) < 0) return RPC_GARBAGE_ARGS;
     if (read_sattr(m_in, &sattr) < 0) return RPC_GARBAGE_ARGS;
     
@@ -645,7 +657,7 @@ static int proc_mkdir(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
 
-    if ((status = read_path(rpc->ft, m_in, &path, 1)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path, PATH_NEW)) < 0) return RPC_GARBAGE_ARGS;
     if (read_sattr(m_in, &sattr) < 0) return RPC_GARBAGE_ARGS;
     
     if (status == NFS_OK) {
@@ -670,7 +682,7 @@ static int proc_rmdir(struct rpc_t* rpc) {
     struct xdr_t* m_in  = rpc->m_in;
     struct xdr_t* m_out = rpc->m_out;
     
-    if ((status = read_path(rpc->ft, m_in, &path, 0)) < 0) return RPC_GARBAGE_ARGS;
+    if ((status = read_path(rpc->ft, m_in, &path, PATH_EXISTS)) < 0) return RPC_GARBAGE_ARGS;
         
     if (status == NFS_OK) {
         fhandle = ft_get_fhandle(rpc->ft, &path);

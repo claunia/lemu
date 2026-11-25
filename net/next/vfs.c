@@ -141,7 +141,7 @@ void vfs_path_canonicalize(char* vfs_path) {
         if(NULL == slashptr) {
             /* this happens if this function was called with a relative path.
              don't do that. */
-            assert("can't find leading '/' before '/../ sequence\n");
+            nn_log("VFS: no '/' before '/../' in '%s'\n", vfsPath);
             break;
         }
         memmove(slashptr,dotdotptr+3,strlen(dotdotptr+3)+1);
@@ -185,8 +185,10 @@ void vfs_path_canonicalize(char* vfs_path) {
         }
     }
     
-    assert(strstr(vfsPath, "/./") == NULL);
-    assert(strstr(vfsPath, "/../") == NULL);
+    /*
+     * No '.' or '..' should be left; if one is, make_host_path() refuses
+     * the path rather than QEMU stopping on an assert
+     */
 }
 
 static void vfs_get_parent_path(const char* vfs_path, char* parent_path) {
@@ -630,8 +632,11 @@ void vfs_set_sattr(struct vfs_t* vfs, const struct path_t* path, struct sattr_t*
     }
     const char* fname = vfs_get_filename(path->vfs);
     
-    assert(strcmp(fname, ".") && strcmp(fname, ".."));
-    (void)fname; /* may be unused */
+    /* the attributes of '.' or '..' would go to another file */
+    if (!strcmp(fname, ".") || !strcmp(fname, "..")) {
+        nn_log("VFS: no attributes for '%s'\n", path->vfs);
+        return;
+    }
     
     serialize(sattr, buffer);
 #if HAVE_LXETXATTR
