@@ -38,6 +38,7 @@
 #include "mmu-booke.h"
 #include "exec/helper-proto.h"
 #include "accel/tcg/cpu-ldst.h"
+#include "system/tcg.h"
 
 /* #define FLUSH_ALL_TLBS */
 
@@ -328,6 +329,15 @@ void ppc_tlb_invalidate_all(CPUPPCState *env)
     }
 }
 
+/* tlbie from another 603, run in this CPU's own thread */
+static void ppc6xx_tlb_invalidate_page_work(CPUState *cs, run_on_cpu_data data)
+{
+    CPUPPCState *env = cpu_env(cs);
+
+    ppc6xx_tlb_invalidate_virt(env, data.target_ptr, 0);
+    ppc6xx_tlb_invalidate_virt(env, data.target_ptr, 1);
+}
+
 void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
 {
 #if !defined(FLUSH_ALL_TLBS)
@@ -349,14 +359,23 @@ void ppc_tlb_invalidate_one(CPUPPCState *env, target_ulong addr)
 
         /*
          * tlbie goes out on the 60x bus, and the other 603s on it drop the
-         * page too (TLBISYNC then tells when they have).
+         * page too (TLBISYNC then tells when they have). With one thread
+         * for all CPUs the others are stopped and their TLBs can be changed
+         * here; with a thread per CPU (MTTCG) each must change its own, so
+         * it gets the work to do before its next instruction.
          */
         CPU_FOREACH(cs) {
             CPUPPCState *other = cpu_env(cs);
 
-            if (other->mmu_model == POWERPC_MMU_SOFT_6xx) {
+            if (other->mmu_model != POWERPC_MMU_SOFT_6xx) {
+                continue;
+            }
+            if (other == env || !qemu_tcg_mttcg_enabled()) {
                 ppc6xx_tlb_invalidate_virt(other, addr, 0);
                 ppc6xx_tlb_invalidate_virt(other, addr, 1);
+            } else {
+                async_run_on_cpu(cs, ppc6xx_tlb_invalidate_page_work,
+                                 RUN_ON_CPU_TARGET_PTR(addr));
             }
         }
         break;
