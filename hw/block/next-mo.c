@@ -451,7 +451,8 @@ static void next_mo_dma_initbuf(void *opaque, NeXTDMAChannel ch,
     NeXTMOState *s = opaque;
 
     s->dma_size = 0;
-    s->dma_limit = MIN(offset, NEXT_MO_DMA_BURST);
+    /* on a long word, or a 4-byte read would run past the buffer */
+    s->dma_limit = offset & (NEXT_MO_DMA_BURST - 4);
 }
 
 /* ---- ECC ---- */
@@ -582,6 +583,11 @@ static void next_mo_ecc_io(void *opaque)
         if (in->size < in->limit) {
             in->limit = (s->csr2 & MOCSR2_ECC_MODE) ? NEXT_MO_SECTOR_DISK
                                                     : NEXT_MO_SECTOR_DATA;
+            /*
+             * The mode can change while the buffer fills: what is past
+             * the new limit is dropped, as limit - size must not wrap
+             */
+            in->size = MIN(in->size, in->limit);
             old_size = in->size;
             next_mo_dma_read_memory(s);
             if (in->size == old_size) {
@@ -1495,10 +1501,30 @@ static const VMStateDescription next_mo_drive_vmstate = {
     },
 };
 
+static int next_mo_post_load(void *opaque, int version_id)
+{
+    NeXTMOState *s = opaque;
+
+    for (int i = 0; i < 2; i++) {
+        if (s->ecc_buf[i].limit > NEXT_MO_SECTOR_DISK ||
+            s->ecc_buf[i].size > s->ecc_buf[i].limit) {
+            return -EINVAL;
+        }
+    }
+    if ((s->eccin & ~1) || (s->eccout & ~1) ||
+        s->dma_limit < 0 || s->dma_limit > NEXT_MO_DMA_BURST ||
+        s->dma_size < 0 || s->dma_size > s->dma_limit ||
+        s->dnum < 0 || s->dnum >= NEXT_MO_DRIVES) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
 static const VMStateDescription next_mo_vmstate = {
     .name = "next-mo",
     .version_id = 2,
     .minimum_version_id = 2,
+    .post_load = next_mo_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT8(tracknumh, NeXTMOState),
         VMSTATE_UINT8(tracknuml, NeXTMOState),
