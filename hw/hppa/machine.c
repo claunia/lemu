@@ -1067,9 +1067,10 @@ static void HP_B160L_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->default_ram_size = 512 * MiB;
 }
 
-/* HP-UX 11.23 c8xx SCRIPTS select a target twice. */
+/* HP-UX 11.23 c8xx SCRIPTS select a target twice and tag no-data commands. */
 static GlobalProperty hppa_astro_compat[] = {
     { "lsi53c895a", "select-continue", "on" },
+    { "lsi53c895a", "wait-complete", "on" },
 };
 
 static void HP_C3700_machine_init_class_init(ObjectClass *oc, const void *data)

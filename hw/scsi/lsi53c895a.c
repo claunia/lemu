@@ -208,6 +208,7 @@ enum {
     LSI_DMA_SCRIPTS, /* processing DMA from lsi_execute_script */
     LSI_DMA_IN_PROGRESS, /* DMA operation is in progress */
     LSI_WAIT_SCRIPTS, /* SCRIPTS stopped because of instruction count limit */
+    LSI_WAIT_COMPLETE, /* no-data command runs, target holds the bus */
 };
 
 enum {
@@ -238,6 +239,7 @@ struct LSIState {
     bool reg_alias;
     bool reject_sdtr;
     bool select_continue;
+    bool wait_complete;
     /* An absent target was selected; report STO when the SCRIPTS resume. */
     bool sto_pending;
     /* Connected because our own SELECT won, not because a target reselected. */
@@ -1026,6 +1028,15 @@ static void lsi_do_command(LSIState *s)
             lsi_set_phase(s, PHASE_MI);
             s->msg_action = LSI_MSG_ACTION_DISCONNECT;
             lsi_queue_command(s);
+        } else if (s->wait_complete) {
+            /*
+             * A no-data command (such as SYNCHRONIZE CACHE) still runs.
+             * The target asserts no REQ until it has the status, so the
+             * SCRIPTS wait.  lsi_command_complete goes to STATUS and
+             * resumes them.
+             */
+            s->dbc = 0;
+            s->waiting = LSI_WAIT_COMPLETE;
         } else {
             /* wait command complete */
             lsi_set_phase(s, PHASE_DI);
@@ -2714,6 +2725,12 @@ static const Property lsi_properties[] = {
      * only at the first instruction that needs the target.
      */
     DEFINE_PROP_BOOL("select-continue", LSIState, select_continue, false),
+    /*
+     * The SCRIPTS wait while a no-data command runs, as on the real chip,
+     * and do not see a false DATA IN phase.  HP-UX 11.23 c8xx sends a tagged
+     * SYNCHRONIZE CACHE and has no data routine for it.
+     */
+    DEFINE_PROP_BOOL("wait-complete", LSIState, wait_complete, false),
 };
 
 static void lsi_class_init(ObjectClass *klass, const void *data)
