@@ -76,6 +76,7 @@
 
 #define ENET_IO_DELAY       500     /* us */
 #define ENET_IO_SHORT       40
+#define ENET_NS_PER_BYTE    800     /* 10 Mbit/s */
 /*
  * QEMU runs the CPU faster than a 25 MHz 68040, and the ROM's self test
  * polls for its looped back packet only so many times: the controller
@@ -581,6 +582,7 @@ static bool mb8795_can_receive(NetClientState *nc)
      */
     return !(s->reset & EN_RESET) && !s->sending && s->rx_size == 0 &&
            s->recv_state == RECV_STATE_WAITING &&
+           qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) >= s->rx_wire_free &&
            (wire == EN_THINWIRE || wire == EN_TWISTEDPAIR);
 }
 
@@ -595,6 +597,14 @@ static ssize_t mb8795_receive(NetClientState *nc, const uint8_t *buf,
         return 0;
     }
     memcpy(pkt, buf, len);
+    /*
+     * Packets come no faster than 10 Mbit/s carries them, with the
+     * preamble, CRC and gap: the driver sets up the receive DMA for the
+     * next one in that time, as on the real wire. Without it a burst,
+     * such as the fragments of an 8 KB NFS read, overflows the receiver.
+     */
+    s->rx_wire_free = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                      (int64_t)(MAX(size, 60) + 24) * ENET_NS_PER_BYTE;
     len = mb8795_fix_bootp(s, pkt, len);
     mb8795_take_packet(s, pkt, len);
     return size;

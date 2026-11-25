@@ -51,6 +51,7 @@ struct MB8795State {
     bool rx_chain;
     bool in_tick;
     bool sending;           /* inside qemu_send_packet() */
+    int64_t rx_wire_free;   /* the wire is free again: virtual ns */
     bool bootp_pending;     /* a NeXT BOOTP request went out */
     uint32_t bootp_xid;
     int32_t recv_state;
