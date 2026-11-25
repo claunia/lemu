@@ -43,6 +43,7 @@
 #define PP_TXCBLEND_0           0x1c60
 #define PP_TXABLEND_0           0x1c64
 #define RB3D_STENCILREFMASK     0x1d7c
+#define SE_CNTL_STATUS          0x2140
 #define RE_TOP_LEFT             0x26c0
 
 #define CB          0x000000    /* 64 x 64 ARGB8888 */
@@ -570,6 +571,182 @@ static void test_tcl_light(const void *model)
     stop(&t);
 }
 
+/* R100 transform and lighting */
+#define R100_SE_VPORT_XSCALE        0x1d98
+#define R100_MATERIAL_EMISSIVE      0x2210
+#define R100_MATERIAL_AMBIENT       0x2220
+#define R100_MATERIAL_DIFFUSE       0x2230
+#define R100_TCL_OUTPUT_VTX_SEL     0x2258
+#define R100_TCL_MATRIX_SELECT_0    0x225c
+#define R100_TCL_MATRIX_SELECT_1    0x2260
+#define R100_TCL_TEXTURE_PROC_CTL   0x2268
+#define R100_TCL_LIGHT_MODEL_CTL    0x226c
+#define R100_TCL_PER_LIGHT_CTL_0    0x2270
+#define SE_VPORT_XFORM              (3 << 24)
+#define CF_W0_IS_W                  (1 << 16)
+#define VTX_W0                      (1 << 0)
+#define VTX_FPCOLOR                 (1 << 1)
+#define VTX_FPALPHA                 (1 << 2)
+#define VTX_N0                      (1 << 18)
+#define VTX_POS                     (VTX_Z | VTX_W0)
+#define VF_TCL                      (1 << 9)
+
+/*
+ * The R100's TCL on with identity matrices: matrix 0 model to clip space,
+ * matrix 1 the modelview, matrix 2 its inverse transposed for the normals.
+ */
+static void r100_tcl_start(Ctx *t)
+{
+    static const float ident[16] = {
+        1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1
+    };
+    static const float vport[6] = { 32, 32, 32, 32, 0.5f, 0.5f };
+    int i;
+
+    start(t);
+    clear(t, DEPTH_16);
+    reg(t, SE_CNTL_STATUS, 0);                   /* no bypass */
+    reg(t, SE_CNTL, SE_SOLID | SE_VPORT_XFORM);
+    reg(t, SE_COORD_FMT, CF_W0_IS_W);            /* clip space x, y, z, w */
+    for (i = 0; i < 6; i++) {
+        reg(t, R100_SE_VPORT_XSCALE + i * 4, f2u(vport[i]));
+    }
+    reg(t, R100_TCL_MATRIX_SELECT_0, 1 | 2 << 16);
+    reg(t, R100_TCL_MATRIX_SELECT_1, 0);
+    for (i = 0; i < 3; i++) {
+        tcl_vectors(t, i * 4, ident, 4);
+    }
+}
+
+/*
+ * A triangle with 3D_DRAW_VBUF from two vertex arrays in video memory:
+ * positions (x, y, z, w) and a second attribute of n floats per vertex.
+ */
+static void r100_tcl_tri(Ctx *t, uint32_t fmt, const float pos[3][4],
+                         const float *attr, int n)
+{
+    uint32_t vb[3 * 8];
+    uint32_t d[5];
+    int i, k;
+
+    for (i = 0; i < 3; i++) {
+        for (k = 0; k < 4; k++) {
+            vb[i * 4 + k] = cpu_to_le32(f2u(pos[i][k]));
+        }
+        for (k = 0; k < n; k++) {
+            vb[12 + i * n + k] = cpu_to_le32(f2u(attr[i * n + k]));
+        }
+    }
+    qpci_memwrite(t->dev, t->fb, VB, vb, (12 + 3 * n) * 4);
+    d[0] = 2;                                    /* two arrays */
+    d[1] = 4 | 4 << 8 | n << 16 | n << 24;      /* sizes and strides */
+    d[2] = VB;
+    d[3] = VB + 12 * 4;
+    pkt3(t, 0x2f, d, 4);                         /* 3D_LOAD_VBPNTR */
+    d[0] = fmt;
+    d[1] = PRIM_TRIS | (2 << 4) | VF_TCL | 3 << 16;
+    pkt3(t, 0x28, d, 2);                         /* 3D_DRAW_VBUF */
+}
+
+/* clip space to the viewport, from arrays and from 3D_DRAW_IMMD */
+static void test_r100_tcl_transform(void)
+{
+    static const float pos[3][4] = {
+        { -0.5f, -0.5f, 0, 1 }, { 0.5f, -0.5f, 0, 1 }, { -0.5f, 0.5f, 0, 1 }
+    };
+    static const float green[12] = { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+    /* the same at w = 2 and moved: half the size, packed blue colour */
+    uint32_t d[2 + 3 * 5] = {
+        VTX_POS | VTX_PKCOLOR, PRIM_TRIS | WALK_DATA | VF_TCL | 3 << 16,
+        f2u(0.5f), f2u(0.5f), f2u(0), f2u(2), BLUE,
+        f2u(1.5f), f2u(0.5f), f2u(0), f2u(2), BLUE,
+        f2u(0.5f), f2u(1.5f), f2u(0), f2u(2), BLUE,
+    };
+    Ctx t;
+
+    r100_tcl_start(&t);
+    r100_tcl_tri(&t, VTX_POS | VTX_FPCOLOR | VTX_FPALPHA, pos, green, 4);
+    pkt3(&t, 0x29, d, ARRAY_SIZE(d));            /* 3D_DRAW_IMMD */
+    /* (16,16) (48,16) (16,48), and (40,40) (56,40) (40,56) */
+    g_assert_cmphex(pixel(&t, 20, 20), ==, GREEN);
+    g_assert_cmphex(pixel(&t, 36, 36), ==, BLACK);
+    g_assert_cmphex(pixel(&t, 43, 43), ==, BLUE);
+    g_assert_cmphex(pixel(&t, 58, 58), ==, BLACK);
+    stop(&t);
+}
+
+/* a directional light straight onto a red material in the registers */
+static void test_r100_tcl_light(void)
+{
+    static const float pos[3][4] = {
+        { -1, -1, 0, 1 }, { 1, -1, 0, 1 }, { -1, 1, 0, 1 }
+    };
+    static const float nrm[9] = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+    static const float white[4] = { 1, 1, 1, 1 };
+    static const float dir[4] = { 0, 0, 1, 0 };
+    static const float zero[4] = { 0, 0, 0, 0 };
+    Ctx t;
+    int i;
+
+    r100_tcl_start(&t);
+    /* lighting on, every material colour from the registers */
+    reg(&t, R100_TCL_LIGHT_MODEL_CTL, 1 | 0x55 << 16);
+    reg(&t, R100_TCL_PER_LIGHT_CTL_0, 1);        /* light 0, diffuse */
+    tcl_vectors(&t, 72, white, 1);               /* its diffuse colour */
+    tcl_vectors(&t, 88, dir, 1);                 /* towards the light */
+    tcl_vectors(&t, 122, zero, 1);               /* no global ambient */
+    for (i = 0; i < 4; i++) {
+        reg(&t, R100_MATERIAL_EMISSIVE + i * 4, 0);
+        reg(&t, R100_MATERIAL_AMBIENT + i * 4, 0);
+        reg(&t, R100_MATERIAL_DIFFUSE + i * 4, f2u(i == 0 || i == 3));
+    }
+    r100_tcl_tri(&t, VTX_POS | VTX_N0, pos, nrm, 3);
+    g_assert_cmphex(pixel(&t, 8, 8), ==, RED);
+    stop(&t);
+}
+
+/*
+ * Texture coordinates from the object position through texture matrix 3
+ * (s = x / 2 + 1/2, in Mesa's row order s, t, q, r): the left half of a
+ * quad over the whole viewport shows texel 0, the right half texel 1.
+ */
+static void test_r100_tcl_texgen(void)
+{
+    static const float texmat[16] = {
+        0.5f, 0, 0, 0.5f, 0, 0.5f, 0, 0.5f, 0, 0, 0, 1, 0, 0, 0, 0
+    };
+    static const float quad[6][2] = {
+        { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 }
+    };
+    uint32_t d[2 + 6 * 4];
+    Ctx t;
+    int i;
+
+    r100_tcl_start(&t);
+    for (i = 0; i < 2; i++) {
+        qpci_io_writel(t.dev, t.fb, TEX + i * 32, RED);
+        qpci_io_writel(t.dev, t.fb, TEX + i * 32 + 4, GREEN);
+    }
+    tex_state(&t, 1);
+    tcl_vectors(&t, 12, texmat, 4);
+    reg(&t, R100_TCL_MATRIX_SELECT_1, 3 << 16);  /* texture matrix 0 */
+    /* unit 0: texgen from the object position, then its matrix */
+    reg(&t, R100_TCL_TEXTURE_PROC_CTL, 1 | 1 << 4 | 4 << 16);
+    reg(&t, R100_TCL_OUTPUT_VTX_SEL, 8 << 16);   /* computed coordinates */
+    d[0] = VTX_POS;
+    d[1] = PRIM_TRIS | WALK_DATA | VF_TCL | 6 << 16;
+    for (i = 0; i < 6; i++) {
+        d[2 + i * 4] = f2u(quad[i][0]);
+        d[3 + i * 4] = f2u(quad[i][1]);
+        d[4 + i * 4] = f2u(0);
+        d[5 + i * 4] = f2u(1);
+    }
+    pkt3(&t, 0x29, d, ARRAY_SIZE(d));
+    g_assert_cmphex(pixel(&t, 8, 32), ==, RED);
+    g_assert_cmphex(pixel(&t, 56, 32), ==, GREEN);
+    stop(&t);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -584,6 +761,9 @@ int main(int argc, char **argv)
     qtest_add_func("/ati-3d/surface-swap", test_surface_swap);
     qtest_add_func("/ati-3d/color-order", test_color_order);
     qtest_add_func("/ati-3d/nonsurf-swap", test_nonsurf_swap);
+    qtest_add_func("/ati-3d/rv100/tcl-transform", test_r100_tcl_transform);
+    qtest_add_func("/ati-3d/rv100/tcl-light", test_r100_tcl_light);
+    qtest_add_func("/ati-3d/rv100/tcl-texgen", test_r100_tcl_texgen);
     /* the Mobility 9000 (M9) and the Radeon 9250 */
     qtest_add_data_func("/ati-3d/rv250/tcl-transform", "rv250",
                         test_tcl_transform);
