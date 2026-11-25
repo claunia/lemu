@@ -1142,6 +1142,20 @@ static void cirrus_get_params(VGACommonState *s1,
     params->hpel_split = s->vga.ar[VGA_ATC_MODE] & 0x20;
 }
 
+/*
+ * Above about 85 MHz the 5434 and later clock two 8 bpp pixels at a time:
+ * SR7 selects 16 bpp clocking and the hidden DAC register reads 0x4a. The
+ * CRTC then counts 16 pixels per character. XFree86 uses it for 1280x1024.
+ */
+static bool cirrus_mux8(CirrusVGAState *s)
+{
+    uint8_t bpp = s->vga.sr[0x07] & CIRRUS_SR7_BPP_MASK;
+
+    return (s->vga.sr[0x07] & 0x01) &&
+           (bpp == CIRRUS_SR7_BPP_16 || bpp == CIRRUS_SR7_BPP_16_DOUBLEVCLK) &&
+           (s->cirrus_hidden_dac_data & 0x0f) == 0x0a;
+}
+
 static uint32_t cirrus_get_bpp16_depth(CirrusVGAState * s)
 {
     uint32_t ret = 16;
@@ -1175,13 +1189,11 @@ static int cirrus_get_bpp(VGACommonState *s1)
             ret = 8;
             break;
         case CIRRUS_SR7_BPP_16_DOUBLEVCLK:
-            ret = cirrus_get_bpp16_depth(s);
+        case CIRRUS_SR7_BPP_16:
+            ret = cirrus_mux8(s) ? 8 : cirrus_get_bpp16_depth(s);
             break;
         case CIRRUS_SR7_BPP_24:
             ret = 24;
-            break;
-        case CIRRUS_SR7_BPP_16:
-            ret = cirrus_get_bpp16_depth(s);
             break;
         case CIRRUS_SR7_BPP_32:
             ret = 32;
@@ -1212,9 +1224,10 @@ static bool cirrus_native_mode(VGACommonState *s)
 
 static void cirrus_get_resolution(VGACommonState *s, int *pwidth, int *pheight)
 {
+    CirrusVGAState *cs = container_of(s, CirrusVGAState, vga);
     int width, height;
 
-    width = (s->cr[0x01] + 1) * 8;
+    width = (s->cr[0x01] + 1) * (cirrus_mux8(cs) ? 16 : 8);
     height = s->cr[0x12] |
         ((s->cr[0x07] & 0x02) << 7) |
         ((s->cr[0x07] & 0x40) << 3);
@@ -2245,6 +2258,21 @@ static bool cirrus_cursor_image_changed(CirrusVGAState *s)
     return true;
 }
 
+/*
+ * The cursor position counts as the CRTC does: in VCLKs, two pixels each in
+ * clock x2 8 bpp, and in pairs of lines when CR17 bit 2 is set. XFree86
+ * halves both for 1280x1024.
+ */
+static int cirrus_cursor_x(CirrusVGAState *s)
+{
+    return s->vga.hw_cursor_x * (cirrus_mux8(s) ? 2 : 1);
+}
+
+static int cirrus_cursor_y(CirrusVGAState *s)
+{
+    return s->vga.hw_cursor_y * ((s->vga.cr[VGA_CRTC_MODE] & 0x04) ? 2 : 1);
+}
+
 static void cirrus_cursor_invalidate(VGACommonState *s1)
 {
     CirrusVGAState *s = container_of(s1, CirrusVGAState, vga);
@@ -2262,14 +2290,14 @@ static void cirrus_cursor_invalidate(VGACommonState *s1)
     image_changed = size && cirrus_cursor_image_changed(s);
     /* invalidate last cursor and new cursor if any change */
     if (image_changed || s->last_hw_cursor_size != size ||
-        s->last_hw_cursor_x != s->vga.hw_cursor_x ||
-        s->last_hw_cursor_y != s->vga.hw_cursor_y) {
+        s->last_hw_cursor_x != cirrus_cursor_x(s) ||
+        s->last_hw_cursor_y != cirrus_cursor_y(s)) {
 
         invalidate_cursor1(s);
 
         s->last_hw_cursor_size = size;
-        s->last_hw_cursor_x = s->vga.hw_cursor_x;
-        s->last_hw_cursor_y = s->vga.hw_cursor_y;
+        s->last_hw_cursor_x = cirrus_cursor_x(s);
+        s->last_hw_cursor_y = cirrus_cursor_y(s);
         /* compute the real cursor min and max y */
         cirrus_cursor_compute_yrange(s);
         invalidate_cursor1(s);
@@ -2318,8 +2346,8 @@ static bool cirrus_cursor_state(VGACommonState *s1, QemuCursorState *cs)
     const uint8_t *img = cirrus_cursor_image(s, &len);
 
     cs->visible = s->vga.sr[0x12] & CIRRUS_CURSOR_SHOW;
-    cs->x = s->vga.hw_cursor_x;
-    cs->y = s->vga.hw_cursor_y;
+    cs->x = cirrus_cursor_x(s);
+    cs->y = cirrus_cursor_y(s);
     cs->w = size;
     cs->h = size;
     cs->shape = qemu_cursor_shape(0, img, len);
@@ -2342,15 +2370,15 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
     } else {
         h = 32;
     }
-    if (scr_y < s->vga.hw_cursor_y ||
-        scr_y >= (s->vga.hw_cursor_y + h)) {
+    if (scr_y < cirrus_cursor_y(s) ||
+        scr_y >= (cirrus_cursor_y(s) + h)) {
         return;
     }
 
     src = s->vga.vram_ptr + s->real_vram_size - 16 * KiB;
     if (s->vga.sr[0x12] & CIRRUS_CURSOR_LARGE) {
         src += (s->vga.sr[0x13] & 0x3c) * 256;
-        src += (scr_y - s->vga.hw_cursor_y) * 16;
+        src += (scr_y - cirrus_cursor_y(s)) * 16;
         poffset = 8;
         content = ((uint32_t *)src)[0] |
             ((uint32_t *)src)[1] |
@@ -2358,7 +2386,7 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
             ((uint32_t *)src)[3];
     } else {
         src += (s->vga.sr[0x13] & 0x3f) * 256;
-        src += (scr_y - s->vga.hw_cursor_y) * 4;
+        src += (scr_y - cirrus_cursor_y(s)) * 4;
 
 
         poffset = 128;
@@ -2370,10 +2398,10 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
         return;
     w = h;
 
-    x1 = s->vga.hw_cursor_x;
+    x1 = cirrus_cursor_x(s);
     if (x1 >= s->vga.last_scr_width)
         return;
-    x2 = s->vga.hw_cursor_x + w;
+    x2 = cirrus_cursor_x(s) + w;
     if (x2 > s->vga.last_scr_width)
         x2 = s->vga.last_scr_width;
     w = x2 - x1;
