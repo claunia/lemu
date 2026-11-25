@@ -6,8 +6,8 @@
 QEMU's Virtual Open Firmware; `aos41/run.sh` boots AmigaOS 4.1 Final
 Edition through bPlan's SmartFirmware in the board's flash. Graphics
 (Radeon 9250 in the AGP slot, 2D, 3D with transform and lighting, and
-command processor), network (on-board VIA Rhine-II) and sound (VIA AC97)
-work.
+command processor), network (the on-board VIA Rhine-II, and the MV64361's
+Gigabit Ethernet port under MorphOS) and sound (VIA AC97) work.
 
 ## Kit
 
@@ -73,7 +73,8 @@ is the serial port. It runs no VGA BIOS, so the Radeon has `romfile=`.
 | North bridge | Marvell MV64361 | |
 | South bridge | VIA VT8231: IDE, USB, PS/2, serial | `ide.device` |
 | Graphics | `ati-vga,model=rv280,vgamem_mb=64` (Radeon 9250, 1002:5960, an R200, 64 MB) in the AGP slot, PCI unit 0 of the MV64361 | Radeon, through the CP's PIO path; TinyGL `r200.library` |
-| Ethernet | `via-rhine` (VT6102) at 0d, on board | `via_rhinepci.device` (`eth1`) |
+| Ethernet | `via-rhine` (VT6102) at 0d, on board, the default NIC | `via_rhinepci.device` (`eth1`) |
+| Gigabit Ethernet | port 1 of the MV64361 (`mv643xx-eth`), PHY at SMI address 9; gets a `-nic` with `model=mv643xx_eth` | `mv6436x_eth.device` (`eth0`) |
 | Sound | `via-ac97` of the VT8231 | `pegasos.audio` (AHI) |
 
 The MV64361 has two PCI units. NetBSD (`sys/arch/ofppc/pci/gt_mainbus.c`)
@@ -82,6 +83,15 @@ calls unit 0 the AGP bus: it holds the AGP slot, at 66 MHz
 the PCI slots (`/pci@80000000`). The chip has no AGP port or GART, so the
 AGP card runs as a PCI one there.
 
+The board has both network ports, and both can be used at once:
+
+    -nic user,model=via-rhine -nic user,model=mv643xx_eth
+
+The Gigabit port's interrupt goes to PCI INTA, so IRQ 9 of the VT8231,
+whatever the MV64361's own interrupt masks say: neither the firmware nor
+the guests set those for it. Linux takes the port on IRQ 9 too
+(`arch/powerpc/platforms/chrp/pegasos_eth.c`).
+
 ## MorphOS notes
 
 - "Radeon: Failed to allocate CCE DMA memory" is what a real Pegasos II
@@ -89,6 +99,9 @@ AGP card runs as a PCI one there.
   PCI Express capability (its own PCI GART) or behind an Apple UniNorth or
   U3 AGP bridge (106b:002d, 0034, 0066, 004b, 0059). Otherwise it feeds the
   command processor through the PIO aperture.
+- Gigabit Ethernet: Network prefs list `mv6436x_eth.device` unit 0 as
+  `eth0`. Only one of `eth0` and `eth1` can be ticked there; ping and DHCP
+  work over either.
 - Network prefs: Use and Save only write what changed from the shown
   settings. On the CD, the DHCP entry for `eth1` is shown but not set up
   until something about it is changed. NetStack only gets the interfaces
@@ -113,8 +126,9 @@ AGP card runs as a PCI one there.
 - Drivers: `peg2ide.device`, `ATIRadeon.chip` with the compositing of
   AmigaOS 4.1 and `W3D_R200.library` for Warp3D, `via-ac97.audio` (AHI)
   and the "VIA Rhine II" interface of the Internet wizard
-  (`DEVS:NetInterfaces/VIA-RHINE`). The "Pegasos 2 built-in Ethernet" is
-  the MV64361's own, which the board does not have.
+  (`DEVS:NetInterfaces/VIA-RHINE`). Its "Pegasos 2 built-in Ethernet" is
+  `via-rhine.device` too: AmigaOS 4.1 has no driver for the MV64361's
+  Gigabit port.
 - Install: boot the CD with `boot cd amigaboot.of` at the firmware prompt.
   In Media Toolbox make `BOOT` (FFS, 512 byte blocks) and DH0 (FFS2, long
   names, 512 byte blocks), save and reboot, then run the installer and

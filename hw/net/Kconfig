@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 config DP8393X
     bool
 
@@ -29,6 +30,9 @@ config TC90X
     bool
     default y if PCI_DEVICES
     depends on PCI
+
+config MV643XX_ETH
+    bool
 
 config VIA_RHINE
     bool

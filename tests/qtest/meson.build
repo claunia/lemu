@@ -204,6 +204,7 @@ qtests_ppc = \
   (config_all_devices.has_key('CONFIG_PREP') ? ['prep-rtc-test'] : []) +                     \
   (config_all_devices.has_key('CONFIG_SAM440EP') or                                          \
    config_all_devices.has_key('CONFIG_SAM460EX') ? ['ppc4xx-emac-test'] : []) +              \
+  (config_all_devices.has_key('CONFIG_PEGASOS') ? ['mv643xx-eth-test'] : []) +              \
   ['boot-order-test']
 
 qtests_ppc64 = \

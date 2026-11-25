@@ -13,6 +13,7 @@
 #include "qapi/error.h"
 #include "hw/ppc/ppc.h"
 #include "hw/core/sysbus.h"
+#include "net/net.h"
 #include "hw/pci/pci_host.h"
 #include "hw/core/irq.h"
 #include "hw/core/or-irq.h"
@@ -140,7 +141,10 @@ static void pegasos2_pci_irq(void *opaque, int n, int level)
     qemu_set_irq(pm->via_pirq[n], level);
 }
 
-/* Set up PCI interrupt routing: lines from pci.0 and pci.1 are ORed */
+/*
+ * Set up PCI interrupt routing: lines from pci.0 and pci.1 are ORed, and
+ * with INTA the MV64361's Gigabit Ethernet interrupt
+ */
 static void pegasos2_setup_pci_irq(PegasosMachineState *pm)
 {
     for (int h = 0; h < 2; h++) {
@@ -158,7 +162,7 @@ static void pegasos2_setup_pci_irq(PegasosMachineState *pm)
                 object_initialize_child_with_props(OBJECT(pm), n,
                                                    ori, sizeof(*ori),
                                                    TYPE_OR_IRQ, &error_fatal,
-                                                   "num-lines", "2", NULL);
+                                                   "num-lines", "3", NULL);
                 qdev_realize(DEVICE(ori), NULL, &error_fatal);
                 qemu_init_irq(&pm->pci_irqs[i], pegasos2_pci_irq, pm, i);
                 qdev_connect_gpio_out(DEVICE(ori), 0, &pm->pci_irqs[i]);
@@ -170,6 +174,14 @@ static void pegasos2_setup_pci_irq(PegasosMachineState *pm)
     }
     qdev_connect_gpio_out_named(pm->sb, "intr", 0,
                                 qdev_get_gpio_in_named(pm->nb, "gpp", 31));
+    /*
+     * The MV64361's Gigabit Ethernet interrupt shares PCI INTA, and so
+     * IRQ 9 of the VT8231. The main interrupt masks are left alone by both
+     * the firmware and the guests: Linux takes the port on IRQ 9, and
+     * MorphOS's mv6436x_eth.device on the PCI interrupt.
+     */
+    qdev_connect_gpio_out_named(pm->nb, "gbe-intr", 0,
+                                qdev_get_gpio_in(DEVICE(&pm->orirq[0]), 2));
 }
 
 static void pegasos_init(MachineState *machine)
@@ -284,8 +296,17 @@ north_bridge:
     }
     case PEGASOS2:
         /* Marvell Discovery II system controller */
-        pm->nb = DEVICE(sysbus_create_simple(TYPE_MV64361, -1,
-                        qdev_get_gpio_in(DEVICE(pm->cpu), PPC6xx_INPUT_INT)));
+        pm->nb = qdev_new(TYPE_MV64361);
+        /*
+         * Its Gigabit Ethernet port 1 is the board's Gigabit port. It gets
+         * a -nic only with model=mv643xx_eth: the VIA Rhine stays the
+         * default network card.
+         */
+        qemu_configure_nic_device(pm->nb, false, "mv643xx_eth");
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(pm->nb), &error_fatal);
+        sysbus_connect_irq(SYS_BUS_DEVICE(pm->nb), 0,
+                           qdev_get_gpio_in(DEVICE(pm->cpu),
+                                            PPC6xx_INPUT_INT));
         pci_bus = mv64361_get_pci_bus(pm->nb, 1);
         break;
     }

@@ -7,7 +7,7 @@ Extra QEMU options are passed through, e.g. ./run.sh -display vnc=127.0.0.1:1.
 The terminal holds the QEMU monitor. quit there stops QEMU at once.
 CD-ROM: in the monitor, change cd0 file.iso. It mounts as CD0. A bootable AmigaOS CD in the drive boots instead of the disk.
 Disk: BOOT (64 MB, FFS, holds amigaboot.of) and DH0 System (FFS2), made with Media Toolbox and the AmigaOS installer.
-Network is QEMU user mode NAT. The VIA Rhine II gets its address by DHCP (DEVS:NetInterfaces/VIA-RHINE); ping 10.0.2.2 reaches the host side. The board's own Marvell Ethernet is not there.
+Network is QEMU user mode NAT. The VIA Rhine II gets its address by DHCP (DEVS:NetInterfaces/VIA-RHINE); ping 10.0.2.2 reaches the host side. The board's Marvell Gigabit Ethernet is there too, on its own NAT, but AmigaOS 4.1 has no driver for it.
 Sound: AHI with via-ac97.audio, VIA-AC97:HiFi 16 bit stereo++ (Prefs/AHI, Play a test sound).
 Graphics: ATIRadeon.chip, with the AmigaOS 4.1 compositing; Warp3D through W3D_R200.
 Firmware prompt: Esc on the serial port in that second stops at the "ok" prompt. boot hd:0 amigaboot.of boots AmigaOS from there; setenv and printenv change and show the NVRAM, which flash.bin keeps.

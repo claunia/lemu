@@ -27,5 +27,6 @@ exec "$q" \
  -drive file=aos41.qcow2,if=ide,index=0,format=qcow2 \
  -drive if=ide,index=2,media=cdrom,id=cd0 \
  -nic user,model=via-rhine \
+ -nic user,model=mv643xx_eth \
  -monitor stdio \
  "$@"

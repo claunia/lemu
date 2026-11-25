@@ -84,6 +84,10 @@ Emulated devices
  * Articia S north bridge (for ``pegasos1``)
  * Marvell MV64361 Discovery II north bridge (for ``pegasos2``)
  * VIA VT8231 south bridge
+ * VIA Rhine-II Ethernet on board (for ``pegasos2``), the default NIC
+ * Gigabit Ethernet port 1 of the MV64361 (for ``pegasos2``); it gets a
+   ``-nic`` given with ``model=mv643xx_eth``, as MorphOS's
+   ``mv6436x_eth.device`` and Linux's ``mv643xx_eth`` use it
  * PCI VGA compatible card (guests may need other card instead)
  * PS/2 keyboard and mouse
 

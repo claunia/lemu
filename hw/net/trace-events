@@ -1,4 +1,6 @@
 # See docs/devel/tracing.rst for syntax documentation.
+#
+# Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 
 # allwinner-sun8i-emac.c
 allwinner_sun8i_emac_mii_write_reg(uint32_t reg, uint32_t value) "MII write: reg=0x%" PRIx32 " value=0x%" PRIx32
@@ -406,6 +408,15 @@ tc90x_write(uint8_t window, uint64_t addr, unsigned size, uint64_t val) "window 
 tc90x_command(unsigned cmd, unsigned arg) "command %u argument 0x%x"
 tc90x_tx(uint32_t len, uint32_t desc) "frame %u bytes, DPD 0x%08x"
 tc90x_rx(uint32_t len, uint32_t desc) "frame %u bytes, UPD 0x%08x"
+
+# mv643xx_eth.c
+mv643xx_eth_read(uint64_t addr, uint32_t val) "0x%04"PRIx64" -> 0x%08"PRIx32
+mv643xx_eth_write(uint64_t addr, uint64_t val) "0x%04"PRIx64" <- 0x%08"PRIx64
+mv643xx_eth_irq(int line, int level) "line %d level %d"
+mv643xx_eth_smi(const char *op, int phy, int reg, uint16_t val) "%s phy %d reg %d 0x%04x"
+mv643xx_eth_tx(int port, int queue, int len) "port %d queue %d sent %d bytes"
+mv643xx_eth_rx(int port, int queue, size_t len) "port %d queue %d received %zu bytes"
+mv643xx_eth_rx_error(int port, int queue, size_t len) "port %d queue %d no descriptor for %zu bytes"
 
 # via-rhine.c
 via_rhine_read(uint64_t addr, unsigned size, uint64_t val) "0x%02"PRIx64" size %u -> 0x%"PRIx64

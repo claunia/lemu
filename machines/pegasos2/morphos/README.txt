@@ -6,7 +6,7 @@ Click in the QEMU window to grab the mouse; Ctrl-Alt-G (Ctrl-Option-G on a Mac) 
 Extra QEMU options are passed through, e.g. ./run.sh -display vnc=127.0.0.1:1.
 The terminal holds the QEMU monitor. quit there stops QEMU at once.
 CD-ROM: in the monitor, change cd0 file.iso. It mounts as CD0.
-Network is QEMU user mode NAT. eth1 (via_rhinepci.device) gets its address by DHCP; ping 10.0.2.2 reaches the host side. eth0 (mv6436x_eth.device) is not there.
+Network is QEMU user mode NAT. eth1 (via_rhinepci.device) gets its address by DHCP; ping 10.0.2.2 reaches the host side. eth0 (mv6436x_eth.device) is the board's Marvell Gigabit Ethernet, on its own NAT: tick it in Network prefs instead of eth1 to use it (the prefs take one of the two).
 Network prefs: Use and Save only apply what was changed. On a fresh system, change the interface (for example to Static and back to DHCP) before Use.
 Sound: AHI with pegasos.audio. C:Play plays a sample, e.g. Play SYS:Games/Diamonds/Sfx/gameend.wav.
 Graphics: the Radeon driver draws with the command processor through its PIO path. 3D works through TinyGL, for example the 3D screen blankers in Prefs/Blanker (Atlantis, Gears, GLMatrix). "Radeon: Failed to allocate CCE DMA memory" on the serial port is normal: MorphOS only does Radeon DMA on PCI Express cards or behind Apple's AGP bridges, and a real Pegasos II has neither.
