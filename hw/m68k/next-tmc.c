@@ -154,7 +154,7 @@ static bool next_tmc_adb_is_keyboard(NeXTTMCState *s, uint8_t addr)
 static void next_tmc_adb_command(NeXTTMCState *s)
 {
     uint8_t cmd = s->adb_command & 0xff;
-    uint8_t in[8], out[16];
+    uint8_t in[1 + 8], out[16];     /* the command and up to 8 bytes */
     int len = 1, olen;
 
     in[0] = cmd;
