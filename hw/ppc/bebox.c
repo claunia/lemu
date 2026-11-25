@@ -479,6 +479,11 @@ static void bebox_machine_class_init(ObjectClass *oc, const void *data)
     static GlobalProperty compat[] = {
         { "i8042", "ibf-read", "on" },
         { "i8042", "reset-mode", "0" },
+        /*
+         * BeOS's Restart only jumps back to the boot ROM, which self-tests
+         * the 8042 and counts on that to turn translation off.
+         */
+        { "i8042", "selftest-reset", "on" },
         /* the IDE drive's DMA request and acknowledge go to channel 5 */
         { "isa-ide", "dma", "5" },
         /* drives of the time had no Ultra DMA; BeOS R4.5 wants MDMA set */

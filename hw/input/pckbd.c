@@ -389,14 +389,19 @@ static void kbd_write_command(void *opaque, hwaddr addr,
         break;
     case KBD_CCMD_SELF_TEST:
         s->status |= KBD_STAT_SELFTEST;
-        /*
-         * The controller's firmware starts over, as on a PS/2 controller:
-         * keyboard and mouse interfaces disabled, no interrupts, no
-         * translation, and the output port as after a reset.
-         */
-        s->mode = KBD_MODE_DISABLE_KBD | KBD_MODE_DISABLE_MOUSE;
-        s->outport = KBD_OUT_RESET | KBD_OUT_A20 | KBD_OUT_ONES;
-        s->write_cmd = 0;
+        if (s->selftest_reset) {
+            /*
+             * The controller's firmware starts over, as on a PS/2
+             * controller: keyboard and mouse interfaces disabled, no
+             * interrupts, no translation, and the output port as after a
+             * reset. Guests that expect the command byte to stay as it was
+             * lose their keyboard interrupts, so only boards that need it
+             * (the BeBox) turn it on.
+             */
+            s->mode = KBD_MODE_DISABLE_KBD | KBD_MODE_DISABLE_MOUSE;
+            s->outport = KBD_OUT_RESET | KBD_OUT_A20 | KBD_OUT_ONES;
+            s->write_cmd = 0;
+        }
         if (s->selftest_reply_first) {
             kbd_ctrl_reset(s);
         }
@@ -785,6 +790,8 @@ static const Property i8042_mmio_properties[] = {
     DEFINE_PROP_UINT64("mask", MMIOKBDState, kbd.mask, UINT64_MAX),
     DEFINE_PROP_UINT8("reset-mode", MMIOKBDState, kbd.reset_mode,
                       KBD_MODE_KBD_INT | KBD_MODE_MOUSE_INT),
+    DEFINE_PROP_BOOL("selftest-reset", MMIOKBDState, kbd.selftest_reset,
+                     false),
     DEFINE_PROP_UINT32("size", MMIOKBDState, size, -1),
 };
 
@@ -985,6 +992,8 @@ static const Property i8042_properties[] = {
     DEFINE_PROP_BOOL("kbd-throttle", ISAKBDState, kbd_throttle, false),
     DEFINE_PROP_BOOL("selftest-reply-first", ISAKBDState,
                      kbd.selftest_reply_first, false),
+    DEFINE_PROP_BOOL("selftest-reset", ISAKBDState, kbd.selftest_reset,
+                     false),
     DEFINE_PROP_BOOL("ctrl-reply-first", ISAKBDState,
                      kbd.ctrl_reply_first, false),
     DEFINE_PROP_BOOL("ibf-read", ISAKBDState, kbd.ibf_read, false),
