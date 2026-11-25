@@ -184,6 +184,7 @@ typedef void (*cirrus_fill_t)(struct CirrusVGAState *s,
 struct PCICirrusVGAState {
     PCIDevice dev;
     CirrusVGAState cirrus_vga;
+    MemoryRegion aperture[3];
 };
 
 #define TYPE_PCI_CIRRUS_VGA "cirrus-vga"
@@ -2932,6 +2933,52 @@ static const MemoryRegionOps cirrus_linear_io_ops = {
     },
 };
 
+/*
+ * The GD5436 decodes 16 MB of linear space as four 4 MB apertures onto
+ * the same memory: the second swaps the bytes of each 16-bit word, the
+ * third those of each 32-bit word, the fourth swaps nothing. The MMIO
+ * registers answer at the top 256 bytes of each, here without a swap.
+ * SINIX-Z's X server uses the ones at 0xffff00.
+ */
+static hwaddr cirrus_aperture_addr(CirrusVGAState *s, hwaddr addr,
+                                   unsigned swap)
+{
+    if ((s->vga.sr[0x17] & 0x44) == 0x44 &&
+        ((addr & s->cirrus_addr_mask & s->linear_mmio_mask) ==
+         s->linear_mmio_mask)) {
+        return addr;
+    }
+    return addr ^ swap;
+}
+
+#define CIRRUS_APERTURE_OPS(n, swap)                                        \
+static uint64_t cirrus_aperture##n##_read(void *opaque, hwaddr addr,        \
+                                          unsigned size)                    \
+{                                                                           \
+    return cirrus_linear_read(opaque,                                       \
+                              cirrus_aperture_addr(opaque, addr, swap),     \
+                              size);                                        \
+}                                                                           \
+static void cirrus_aperture##n##_write(void *opaque, hwaddr addr,           \
+                                       uint64_t val, unsigned size)         \
+{                                                                           \
+    cirrus_linear_write(opaque, cirrus_aperture_addr(opaque, addr, swap),   \
+                        val, size);                                         \
+}                                                                           \
+static const MemoryRegionOps cirrus_aperture##n##_ops = {                   \
+    .read = cirrus_aperture##n##_read,                                      \
+    .write = cirrus_aperture##n##_write,                                    \
+    .endianness = DEVICE_LITTLE_ENDIAN,                                     \
+    .impl = {                                                               \
+        .min_access_size = 1,                                               \
+        .max_access_size = 1,                                               \
+    },                                                                      \
+};
+
+CIRRUS_APERTURE_OPS(1, 1)
+CIRRUS_APERTURE_OPS(2, 3)
+CIRRUS_APERTURE_OPS(3, 0)
+
 static const MemoryRegionOps cirrus_vga_io_ops = {
     .read = cirrus_vga_ioport_read,
     .write = cirrus_vga_ioport_write,
@@ -3086,6 +3133,22 @@ static void pci_cirrus_vga_realize(PCIDevice *dev, Error **errp)
     /* memory #0 LFB */
     /* memory #1 memory-mapped I/O */
     /* XXX: s->vga.vram_size must be a power of two */
+    if (device_id == CIRRUS_ID_CLGD5436 && s->vga.vram_size_mb == 4) {
+        static const MemoryRegionOps *const ops[] = {
+            &cirrus_aperture1_ops, &cirrus_aperture2_ops, &cirrus_aperture3_ops,
+        };
+        static const char *const names[] = {
+            "cirrus-linear-wswap", "cirrus-linear-dswap", "cirrus-linear-ap3",
+        };
+        int i;
+
+        for (i = 0; i < 3; i++) {
+            memory_region_init_io(&d->aperture[i], OBJECT(dev), ops[i], s,
+                                  names[i], 4 * MiB);
+            memory_region_add_subregion(&s->pci_bar, (i + 1) * 4 * MiB,
+                                        &d->aperture[i]);
+        }
+    }
     pci_register_bar(&d->dev, 0, PCI_BASE_ADDRESS_MEM_PREFETCH, &s->pci_bar);
     if (device_id == CIRRUS_ID_CLGD5446) {
         pci_register_bar(&d->dev, 1, 0, &s->cirrus_mmio_io);
@@ -3142,10 +3205,24 @@ static const TypeInfo cirrus_vga_gd5434_info = {
     .class_init    = cirrus_vga_gd5434_class_init,
 };
 
+/* GD5436 variant: 2 MB, no separate MMIO BAR; SINIX-Z's X server wants it */
+static void cirrus_vga_gd5436_class_init(ObjectClass *klass, const void *data)
+{
+    PCI_DEVICE_CLASS(klass)->device_id = CIRRUS_ID_CLGD5436;
+    DEVICE_CLASS(klass)->desc = "Cirrus CLGD 5436 VGA";
+}
+
+static const TypeInfo cirrus_vga_gd5436_info = {
+    .name          = "cirrus-vga-gd5436",
+    .parent        = TYPE_PCI_CIRRUS_VGA,
+    .class_init    = cirrus_vga_gd5436_class_init,
+};
+
 static void cirrus_vga_register_types(void)
 {
     type_register_static(&cirrus_vga_info);
     type_register_static(&cirrus_vga_gd5434_info);
+    type_register_static(&cirrus_vga_gd5436_info);
 }
 
 type_init(cirrus_vga_register_types)
