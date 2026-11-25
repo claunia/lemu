@@ -3,7 +3,7 @@ Windows NT 3.51 Workstation (build 1057, SP5) for DEC Alpha on QEMU's DECpc AXP 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 NT logs on automatically as Administrator (password: password). Extra QEMU options are passed through, e.g. ./run.sh -display vnc=:1.
 The firmware takes about a minute to show its boot menu, then boots NT by itself.
-Mouse: no vmmouse driver, so QEMU grabs the mouse when you click in the window. Ctrl-Alt-G lets it go.
+Mouse: the vmmouse driver (LEMU machines/vmmouse) is installed, so the pointer moves in and out of the window without a grab. NT 3.51 has no wheel support.
 The screen is 1280x1024 with 65536 colours (S3 86C928, 4 MB).
 C: is the 10 MB FAT system partition, NT is in D:\WINNT35 (NTFS), the CD-ROM is E:.
 Compilers: Visual C++ 4.1 for Alpha (cl 10.10) in D:\MSDEV and the Win32 SDK of August 1996 in D:\MSTOOLS. cl and nmake work in any new Command Prompt.
