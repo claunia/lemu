@@ -118,6 +118,19 @@ R3, R4.5 and R5 on IDE with a DEC 21041, R4 on SCSI with a PCI NE2000,
 DR8, the Preview Release and Preview Release 2 on SCSI with a DEC 21041,
 1.1d7 and 1.1d7.1 on SCSI with an ISA NE2000.
 
+## Release
+
+`release/mkrelease.sh` packs one kit from the one build of
+`machines/release` (see its README): the kit's folder name, a folder
+with its `beos.qcow2` and `flash.bin`, `STAGE/ppc`, and the file to
+write.
+
+    sh release/mkrelease.sh r45 VMDIR STAGE/ppc beosr45bebox-lemu.tar.lz
+
+Before packing, check that the binaries have what the kits use:
+`sh release/check.sh macos OUT/macos-qemu-system-ppc.features`, and
+`linux` with the Linux lists. `release/required.txt` lists the features.
+
 ## Network
 
 The BeBox has no network port: use a PCI card in a free slot. BeOS R4
