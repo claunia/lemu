@@ -333,6 +333,11 @@ static void bebox_init(MachineState *machine)
             error_report("only 6xx bus is supported on this machine");
             exit(1);
         }
+        /*
+         * BeOS's idle threads spin on "b .": let them give the host
+         * thread to the other CPU, which does the work.
+         */
+        env->idle_yield = true;
         cpu_ppc_tb_init(env, BEBOX_BUS_HZ / 4);
         qemu_register_reset(bebox_cpu_reset, cpu);
         s->cpu[i] = cpu;

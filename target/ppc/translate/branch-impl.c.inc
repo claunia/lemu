@@ -50,11 +50,11 @@ static bool trans_B(DisasContext *ctx, arg_I_b *a)
      * "b ." is an idle loop, as in BeOS's idle threads: give the host
      * thread to the other CPUs until an interrupt takes this one out of
      * it. With round-robin TCG the CPUs share one thread, and the spin
-     * would take time from the CPU doing the work. Not with icount, where
-     * the clock only moves as instructions run.
+     * would take time from the CPU doing the work. Only on the boards
+     * that ask for it (the BeBox), and not while single-stepping or with
+     * icount: see ctx->idle_yield.
      */
-    if (!a->lk && target == ctx->cia &&
-        !(tb_cflags(ctx->base.tb) & CF_USE_ICOUNT)) {
+    if (ctx->idle_yield && !a->lk && target == ctx->cia) {
         gen_exception_nip(ctx, EXCP_YIELD, ctx->cia);
         return true;
     }
