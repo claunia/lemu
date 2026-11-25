@@ -220,13 +220,20 @@ qtests_sh4 = (config_all_devices.has_key('CONFIG_ISA_TESTDEV') ? ['endianness-te
 qtests_sh4eb = (config_all_devices.has_key('CONFIG_ISA_TESTDEV') ? ['endianness-test'] : [])
 
 qtests_sparc = ['prom-env-test', 'm48t59-test', 'boot-serial-test',
-                'sun4m-escc-test'] + \
+                'sun4m-escc-test', 'sun4m-apc-test',
+                'sun4m-solaris-idle-test', 'sun4m-mmu-nofault-test',
+                'sun4m-pil-delay-slot-test',
+                'sun4m-solaris-smp-idle-test',
+                'sun4m-fsr-rd-test',
+                'sun4m-cs4231-test',
+                'sun4m-esp-test'] + \
   qtests_filter
 
 qtests_sparc64 = \
   (config_all_devices.has_key('CONFIG_ISA_TESTDEV') ? ['endianness-test'] : []) +            \
   qtests_filter + \
-  ['prom-env-test', 'boot-serial-test']
+  ['prom-env-test', 'boot-serial-test', 'sun4u-cmd646-test',
+   'sun4u-idprom-test', 'sun4u-softint-test']
 
 qtests_npcm7xx = \
   ['npcm7xx_adc-test',
@@ -372,6 +379,7 @@ qos_test_ss.add(
   'virtio-net-test.c',
   'virtio-rng-test.c',
   'virtio-scsi-test.c',
+  'scsi-md-test.c',
   'virtio-iommu-test.c',
   'vmxnet3-test.c',
   'igb-test.c',

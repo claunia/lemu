@@ -6,6 +6,7 @@ scsi_ss.add(files(
   'emulation.c',
   'scsi-bus.c',
   'scsi-disk.c',
+  'scsi-md.c',
   'scsi-generic.c',
 ))
 scsi_ss.add(when: 'CONFIG_ESP', if_true: files('esp.c'))

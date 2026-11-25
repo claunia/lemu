@@ -86,3 +86,28 @@ The kit of 2026-11-14 on an Apple Silicon Mac:
    A fill from inside A/UX misses the free fragments of partly used
    blocks, with the old data of deleted files in them.
 4. Scan the raw image for the LAN's addresses and names, then pack.
+
+## Sony MD DATA drive
+
+`-device scsi-md` is a Sony MDH-10 (or, with `model=mdm110`, an
+MDM-110) MD DATA drive. Mac OS 7.5 with Sony's "MD DATA Installation
+Software for Macintosh" 1.81 mounts, reads, writes and formats its discs:
+
+    -drive file=disc.img,if=none,id=md0,format=raw \
+    -device scsi-md,scsi-id=3,drive=md0
+
+- **The disc** is a raw image of 70464 blocks of 2048 bytes (144310272
+  bytes), the layout of an Aaru dump. A blank disc:
+  `qemu-img create -f raw disc.img 144310272`. Format it from the Mac
+  with "MD DATA quick format" or "MD DATA safe format".
+- **The U-TOC** lives next to the image as `disc.utoc.bin` (the image
+  name without its extension), as Aaru keeps it. Without one the drive
+  makes the MD DATA U-TOC for a disc with an MDFS volume, and a blank one
+  otherwise. `utoc=path` puts it somewhere else.
+- **The drivers:** copy "MD Driver", "MD File System" and "File System
+  Manager" into the System Folder.
+- **Ejecting:** drag the disc to the Trash. The drive opens its tray and
+  the driver polls it. Put a disc in with the monitor:
+  `change md0 disc.img raw`. A reset puts the last disc back.
+- **A read-only image** is a write-protected disc.
+- **Trace:** `-trace "scsi_md_*"` logs every command and its sense.

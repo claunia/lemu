@@ -7,6 +7,7 @@ Installed: everything from the AIX 3.2.5 Volume 1 and 2 and AIXwindows 1.2.5 CDs
 /usr/local has software from the UCLA AIX PDS archive: bash, emacs, gcc, gdb, make, perl, the GNU utilities, less, screen, mc, lynx, wget, ncftp, Mosaic, nedit, xv, rxvt and more.
 Mathematica 2.2 is in /usr/local/mathematica: mathematica starts the notebook front end (in X), math the text kernel with Motif graphics windows. Sample notebooks: /usr/local/mathematica/FrontEnd/SampleNotebooks.
 PC Simulator/6000 1.2 is in /usr/lpp/pcsim: pcsim -Cdrive /usr/local/pcsim/pcdos5.img boots PC DOS 5.02 (add -dmode VGA in X). To quit it in a terminal, press ESC, then type pcsim. See /usr/local/pcsim/README.
+Archaic, a web browser, is in /usr/local/bin, its source in /usr/local/src/archaic: run WRP 4.14.1 or newer (https://github.com/tenox7/wrp) on your computer, then type archaic in an aixterm. It finds WRP at your computer's port 8080 (10.0.2.2:8080). Ctrl-Q quits. Started as root, it updates itself through WRP.
 Extra QEMU options are passed through, e.g. ./run.sh -display vnc=:1.
 QEMU halts the CPU while AIX is idle, so an idle VM uses 6-15% of a host core.
 The operator panel window shows the LED codes; click a key position to turn the key. KEY=service ./run.sh sets it at power-on.
