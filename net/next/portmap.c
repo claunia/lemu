@@ -98,6 +98,11 @@ static int proc_callit(struct rpc_t* rpc) {
     rpc->prot = xdr_read_long(m_in);
     rpc->prot = IPPROTO_UDP; /* protocol is ignored, always UDP */
     
+    /* not through the port mapper again: each call would nest one more */
+    if (rpc->prog == PORTMAPPROG) {
+        return RPC_SUCCESS;
+    }
+    
     while (prog) {
         if (rpc_match_prog(rpc, prog) > 0) {
             xdr_write_long(m_out, prog->port);
