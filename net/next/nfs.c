@@ -109,6 +109,9 @@ enum NFTYPE {
 
 static const int BLOCK_SIZE = 4096;
 
+/* NFS version 2: the most a READ or WRITE moves */
+#define NFS_MAXDATA 8192
+
 
 static int check_file(struct ft_t* ft, const struct path_t* path, int lookup) {
     int err;
@@ -424,6 +427,9 @@ static int proc_read(struct rpc_t* rpc) {
     offset = xdr_read_long(m_in);
     count  = xdr_read_long(m_in);
     xdr_read_skip(m_in, 4); /* totalcount unused */
+    if (count > NFS_MAXDATA) {
+        count = NFS_MAXDATA;
+    }
     
     if (status == NFS_OK) {
         data = xdr_get_pointer(m_out);
