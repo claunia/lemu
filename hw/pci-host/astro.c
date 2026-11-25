@@ -304,6 +304,40 @@ static const MemoryRegionOps elroy_config_addr_ops = {
 };
 
 
+/*
+ * A PCI write to 0xfee00000 + (id << 12) + (eid << 4) is an interrupt
+ * transaction: the data is the EIR bit for the CPU at HPA
+ * 0xf0000000 | (eid << 20) | (id << 12), as the IOSAPIC sends it below.
+ * HP-UX 11.23 c8xx SCRIPTS end each command this way.
+ */
+#define ASTRO_INT_TXN_BASE  0xfee00000ULL
+#define ASTRO_INT_TXN_SIZE  0x00100000ULL
+
+static uint64_t astro_int_txn_read(void *opaque, hwaddr addr, unsigned size)
+{
+    return 0;
+}
+
+static void astro_int_txn_write(void *opaque, hwaddr addr, uint64_t val,
+                                unsigned size)
+{
+    hwaddr cpu_hpa = 0xf0000000 | (((addr >> 4) & 0xff) << 20) |
+                     (((addr >> 12) & 0xff) << 12);
+
+    trace_astro_int_txn(addr + ASTRO_INT_TXN_BASE, val);
+    stl_be_phys(&address_space_memory, F_EXTEND(cpu_hpa), val & 63);
+}
+
+static const MemoryRegionOps astro_int_txn_ops = {
+    .read = astro_int_txn_read,
+    .write = astro_int_txn_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid.min_access_size = 1,
+    .valid.max_access_size = 8,
+    .impl.min_access_size = 4,
+    .impl.max_access_size = 4,
+};
+
 /* Handle PCI-to-system address translation.  */
 static IOMMUTLBEntry astro_translate_iommu(IOMMUMemoryRegion *iommu,
                                              hwaddr addr,
@@ -320,6 +354,18 @@ static IOMMUTLBEntry astro_translate_iommu(IOMMUMemoryRegion *iommu,
 #define SBA_PDIR_VALID_BIT      0x8000000000000000ULL
 
     addr &= ~addr_mask;
+
+    /* An interrupt transaction goes to a CPU, not through the I/O TLB. */
+    if (addr >= ASTRO_INT_TXN_BASE &&
+        addr < ASTRO_INT_TXN_BASE + ASTRO_INT_TXN_SIZE) {
+        return (IOMMUTLBEntry) {
+            .target_as = &s->int_txn_as,
+            .iova = addr,
+            .translated_addr = addr - ASTRO_INT_TXN_BASE,
+            .addr_mask = addr_mask,
+            .perm = IOMMU_WO,
+        };
+    }
 
     /*
      * Default translation: "32-bit PCI Addressing on 40-bit Runway".
@@ -1025,6 +1071,9 @@ static void astro_realize(DeviceState *obj, Error **errp)
                              "iommu-astro", UINT64_MAX);
     address_space_init(&s->iommu_as, MEMORY_REGION(&s->iommu),
                        "bm-pci");
+    memory_region_init_io(&s->int_txn, OBJECT(s), &astro_int_txn_ops, s,
+                          "astro-int-txn", ASTRO_INT_TXN_SIZE);
+    address_space_init(&s->int_txn_as, &s->int_txn, "astro-int-txn");
 
     /* Create Elroys (PCI host bus chips).  */
     for (i = 0; i < ELROY_NUM; i++) {
