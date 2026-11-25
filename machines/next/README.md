@@ -98,6 +98,12 @@ and, if the VM has one, `nvram.bin`. It is only read.
   NetInfo server to bind to. `net/next/filter-next.c` answers both on the
   user network, as Previous does, and an NTP server gives the date. The
   guest is called `next` in the domain `home`.
+- These servers, 10.0.2.254 to the guest, answer inside QEMU: they have
+  no host sockets, so nothing but the guest reaches them, not even the
+  folder that `nfs-share` shares.
+- In the shared folder the host never follows a link: the guest sees
+  links as links and follows them itself, so a link cannot reach a host
+  file outside the folder.
 - With no answers, NeXTSTEP waits a long time at boot for the network
   (Ctrl-C, or c on 2.2, skips it).
 - NeXTSTEP refuses root logins over telnet. NeXTSTEP 2.2 has a `me`
