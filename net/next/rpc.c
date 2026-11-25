@@ -84,6 +84,7 @@ struct rpc_conn_t {
 static struct rpc_t *rpc_server;
 static struct xdr_t *rpc_in;
 static struct xdr_t *rpc_out;
+static uint32_t rpc_out_capacity;
 static QLIST_HEAD(, rpc_conn_t) rpc_conns = QLIST_HEAD_INITIALIZER(rpc_conns);
 
 int rpc_match_prog(struct rpc_t *rpc, struct rpc_prog_t *prog)
@@ -207,18 +208,26 @@ static bool rpc_input(struct rpc_prog_t *prog)
 
         rpc->verif.flavor = xdr_read_long(m_in);
         rpc->verif.length = xdr_read_long(m_in);
-        xdr_read_skip(m_in, rpc->verif.length);
+        if (rpc->auth.length > RPC_MAX_AUTH_BYTES ||
+            rpc->verif.length > RPC_MAX_AUTH_BYTES ||
+            xdr_read_skip(m_in, rpc->verif.length) < 0) {
+            nn_log("RPC: bad credentials or verifier\n");
+            xdr_write_long(m_out, RPC_MSG_DENIED);
+            xdr_write_long(m_out, RPC_AUTH_ERROR);
+            xdr_write_long(m_out, RPC_AUTH_BADCRED);
+            return true;
+        }
 
+        /* our verifier: none */
         xdr_write_long(m_out, RPC_MSG_ACCEPTED);
-        xdr_write_long(m_out, rpc->verif.flavor);
-        xdr_write_long(m_out, rpc->verif.length);
-        xdr_write_zero(m_out, rpc->verif.length);
+        xdr_write_long(m_out, RPC_AUTH_NONE);
+        xdr_write_long(m_out, 0);
         status_ptr = xdr_get_pointer(m_out);
-        xdr_write_skip(m_out, 4); /* the status goes here */
+        xdr_write_long(m_out, 0); /* the status goes here */
 
         status = rpc_call(rpc);
 
-        xdr_write_long_at(status_ptr, status);
+        xdr_write_long_at(m_out, status_ptr, status);
 
         if (status == RPC_PROG_MISMATCH) {
             rpc_log(rpc, "Version mismatch: req %d, min %d, max %d",
@@ -240,7 +249,20 @@ static bool rpc_input(struct rpc_prog_t *prog)
         xdr_write_long(m_out, 2); /* lowest version */
         xdr_write_long(m_out, 2); /* highest version */
     }
+    if (m_out->error) {
+        nn_log("RPC: the reply does not fit\n");
+        return false;
+    }
     return true;
+}
+
+/* The reply starts out_room bytes into rpc_out, after a record mark */
+static void rpc_out_reset(size_t out_room)
+{
+    rpc_out->data = rpc_out->head + out_room;
+    rpc_out->size = 0;
+    rpc_out->capacity = rpc_out_capacity - out_room;
+    rpc_out->error = false;
 }
 
 static void rpc_xdr_reset(uint8_t *data, uint32_t len, size_t out_room)
@@ -248,8 +270,7 @@ static void rpc_xdr_reset(uint8_t *data, uint32_t len, size_t out_room)
     memcpy(rpc_in->head, data, len);
     rpc_in->data = rpc_in->head;
     rpc_in->size = len;
-    rpc_out->data = rpc_out->head + out_room;
-    rpc_out->size = 0;
+    rpc_out_reset(out_room);
 }
 
 int proc_null(struct rpc_t *rpc)
@@ -297,8 +318,7 @@ static void rpc_udp_read(void *opaque)
     }
     rpc_in->data = rpc_in->head;
     rpc_in->size = n;
-    rpc_out->data = rpc_out->head;
-    rpc_out->size = 0;
+    rpc_out_reset(0);
     if (rpc_input(prog)) {
         sendto(prog->fd, (const char *)rpc_out->head, rpc_out->size, 0,
                (struct sockaddr *)&from, fromlen);
@@ -508,6 +528,7 @@ bool nn_rpc_start(const char *share)
     rpc = rpc_server = g_new0(struct rpc_t, 1);
     rpc_in = xdr_init();
     rpc_out = xdr_init();
+    rpc_out_capacity = rpc_out->capacity;
     pstrcpy(rpc->hostname, sizeof(rpc->hostname), nn_cfg.server_name);
     rpc->ip_addr = CTL_NET | CTL_NFSD;
 

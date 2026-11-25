@@ -34,6 +34,7 @@ struct xdr_t* xdr_init(void) {
     xdr->head = xdr->data;
     xdr->size = 0;
     xdr->capacity = MAXDATA;
+    xdr->error = false;
     return xdr;
 }
 
@@ -72,6 +73,7 @@ uint32_t xdr_read_long(struct xdr_t* xdr) {
 void xdr_write_long(struct xdr_t* xdr, uint32_t val) {
     if (xdr->capacity - xdr->size < 4) {
         nn_log("[XDR] Error: Write long overflow\n");
+        xdr->error = true;
     } else {
         *(uint32_t*)xdr->data = htonl(val);
         xdr->data += 4;
@@ -110,20 +112,21 @@ void xdr_write_string(struct xdr_t* xdr, const char* str, uint32_t maxlen) {
     uint32_t len;
     if (xdr->capacity - xdr->size < 4) {
         nn_log("[XDR] Error: Write string overflow 1\n");
+        xdr->error = true;
         return;
     }
     len = (uint32_t)strlen(str);
+    if (len > maxlen) {
+        nn_log("[XDR] Error: Write string truncated\n");
+        len = maxlen;
+    }
     xdr_write_long(xdr, len);
     if (xdr->capacity - xdr->size < len) {
         nn_log("[XDR] Error: Write string overflow 2\n");
+        xdr->error = true;
         return;
     }
-    if (len > maxlen) {
-        nn_log("[XDR] Error: Write string truncated\n");
-        memcpy(xdr->data, str, maxlen);
-    } else {
-        memcpy(xdr->data, str, len);
-    }
+    memcpy(xdr->data, str, len);
     xdr->data += len;
     xdr->size += len;
     xdr_write_align(xdr);
@@ -145,6 +148,7 @@ int xdr_read_data(struct xdr_t* xdr, void* data, uint32_t len) {
 void xdr_write_data(struct xdr_t* xdr, void* data, uint32_t len) {
     if (xdr->capacity - xdr->size < len) {
         nn_log("[XDR] Error: Write data overflow\n");
+        xdr->error = true;
     } else if (len > 0) {
         memcpy(xdr->data, data, len);
         xdr->data += len;
@@ -168,6 +172,7 @@ int xdr_read_skip(struct xdr_t* xdr, uint32_t len) {
 void xdr_write_skip(struct xdr_t* xdr, uint32_t len) {
     if (xdr->capacity - xdr->size < len) {
         nn_log("[XDR] Error: Write skip overflow\n");
+        xdr->error = true;
     } else if (len > 0) {
         xdr->data += len;
         xdr->size += len;
@@ -178,6 +183,7 @@ void xdr_write_skip(struct xdr_t* xdr, uint32_t len) {
 void xdr_write_zero(struct xdr_t* xdr, uint32_t len) {
     if (xdr->capacity - xdr->size < len) {
         nn_log("[XDR] Error: Write zero overflow\n");
+        xdr->error = true;
     } else if (len > 0) {
         memset(xdr->data, 0, len);
         xdr->data += len;
@@ -189,6 +195,7 @@ void xdr_write_zero(struct xdr_t* xdr, uint32_t len) {
 int xdr_write_check(struct xdr_t* xdr, uint32_t len) {
     if (xdr->capacity - xdr->size < len) {
         nn_log("[XDR] Error: Write check overflow\n");
+        xdr->error = true;
         return -1;
     }
     return 0;
@@ -198,8 +205,14 @@ uint8_t* xdr_get_pointer(struct xdr_t* xdr) {
     return (uint8_t*)xdr->data;
 }
 
-void xdr_write_long_at(uint8_t* data, uint32_t val) {
-    *(uint32_t*)data = htonl(val);
+/* Only into what was written already: data comes from xdr_get_pointer() */
+void xdr_write_long_at(struct xdr_t* xdr, uint8_t* data, uint32_t val) {
+    if (data < xdr->data - xdr->size || data + 4 > xdr->data) {
+        nn_log("[XDR] Error: Write long at outside the data\n");
+        xdr->error = true;
+        return;
+    }
+    stl_be_p(data, val);
 }
 
 uint32_t xdr_read_long_at(uint8_t* data) {

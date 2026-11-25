@@ -50,6 +50,11 @@
 #define RPC_PROC_UNAVAIL  3
 #define RPC_GARBAGE_ARGS  4
 
+#define RPC_AUTH_BADCRED  1  /* bad credentials (seal broken) */
+
+/* RFC 5531: the body of a credential or verifier has at most 400 bytes */
+#define RPC_MAX_AUTH_BYTES 400
+
 #define RPC_AUTH_NONE     0
 #define RPC_AUTH_UNIX     1
 #define RPC_AUTH_SHORT    2

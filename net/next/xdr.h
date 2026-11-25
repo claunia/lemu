@@ -8,6 +8,7 @@ struct xdr_t {
     uint8_t* head;
     uint32_t size;
     uint32_t capacity;
+    bool     error;     /* a write did not fit */
 };
 
 uint32_t xdr_read_long(struct xdr_t* xdr);
@@ -24,7 +25,7 @@ void xdr_write_zero(struct xdr_t* xdr, uint32_t len);
 int  xdr_write_check(struct xdr_t* xdr, uint32_t len);
 
 uint8_t* xdr_get_pointer(struct xdr_t* xdr);
-void     xdr_write_long_at(uint8_t* data, uint32_t val);
+void     xdr_write_long_at(struct xdr_t* xdr, uint8_t* data, uint32_t val);
 uint32_t xdr_read_long_at(uint8_t* data);
 
 struct xdr_t* xdr_init(void);

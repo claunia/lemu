@@ -105,7 +105,7 @@ static int proc_callit(struct rpc_t* rpc) {
             xdr_write_long(m_out, 0); /* write this after the call */
             before = m_out->size;
             result = prog->run(rpc);
-            xdr_write_long_at(size_ptr, m_out->size - before);
+            xdr_write_long_at(m_out, size_ptr, m_out->size - before);
             return result;
         }
         prog = prog->next;
