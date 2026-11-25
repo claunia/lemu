@@ -28,6 +28,7 @@
 #include "qemu/log.h"
 #include "qemu/module.h"
 #include "hw/isa/isa.h"
+#include "hw/core/irq.h"
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "hw/dma/i8257.h"
@@ -53,6 +54,27 @@ struct I82374State {
     uint8_t commands[8];
     PortioList port_list;
     I8257State *dma[2];
+    qemu_irq irq13;
+    /* IRQ13 as the scatter-gather lists drive it */
+    bool sg_irq_level;
+};
+
+static bool i82374_sg_irq_needed(void *opaque)
+{
+    I82374State *s = opaque;
+
+    return s->sg_irq_level;
+}
+
+static const VMStateDescription vmstate_i82374_sg_irq = {
+    .name = "i82374/sg-irq",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = i82374_sg_irq_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_BOOL(sg_irq_level, I82374State),
+        VMSTATE_END_OF_LIST()
+    },
 };
 
 static const VMStateDescription vmstate_i82374 = {
@@ -63,7 +85,28 @@ static const VMStateDescription vmstate_i82374 = {
         VMSTATE_UINT8_ARRAY(commands, I82374State, 8),
         VMSTATE_END_OF_LIST()
     },
+    .subsections = (const VMStateDescription * const []) {
+        &vmstate_i82374_sg_irq,
+        NULL
+    },
 };
+
+/*
+ * Both DMA controllers' scatter-gather interrupts go out on IRQ13, which
+ * other devices may share: on the 40p it is also the 53C810's. Drive the
+ * line only when the OR of the two changes, so that a master clear or a
+ * list start lowers IRQ13 only if a list had raised it.
+ */
+static void i82374_set_sg_irq(void *opaque, int n, int level)
+{
+    I82374State *s = opaque;
+    bool out = s->dma[0]->sg_irq || s->dma[1]->sg_irq;
+
+    if (out != s->sg_irq_level) {
+        s->sg_irq_level = out;
+        qemu_set_irq(s->irq13, out);
+    }
+}
 
 /*
  * The scatter-gather registers, one per channel (channel 4, the cascade,
@@ -193,8 +236,10 @@ static void i82374_realize(DeviceState *dev, Error **errp)
     s->dma[0] = I8257(isa_bus_get_dma(isa_bus, 0));
     s->dma[1] = I8257(isa_bus_get_dma(isa_bus, 4));
     /* the end of a scatter-gather list can raise IRQ13 */
-    s->dma[0]->sg_irq_out = isa_get_irq(ISA_DEVICE(dev), 13);
-    s->dma[1]->sg_irq_out = isa_get_irq(ISA_DEVICE(dev), 13);
+    s->irq13 = isa_get_irq(ISA_DEVICE(dev), 13);
+    qdev_init_gpio_in_named(dev, i82374_set_sg_irq, "sg-irq", 2);
+    s->dma[0]->sg_irq_out = qdev_get_gpio_in_named(dev, "sg-irq", 0);
+    s->dma[1]->sg_irq_out = qdev_get_gpio_in_named(dev, "sg-irq", 1);
 
     portio_list_init(&s->port_list, OBJECT(s), i82374_portio_list, s,
                      "i82374");
