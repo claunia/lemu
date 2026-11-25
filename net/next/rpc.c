@@ -120,7 +120,8 @@ static int rpc_call(struct rpc_t *rpc)
     return mismatch ? RPC_PROG_MISMATCH : RPC_PROG_UNAVAIL;
 }
 
-static void rpc_read_auth(struct rpc_t *rpc)
+/* false for credentials that cannot be right */
+static bool rpc_read_auth(struct rpc_t *rpc)
 {
     struct xdr_t *m_in = rpc->m_in;
     int len = rpc->auth.length;
@@ -135,12 +136,14 @@ static void rpc_read_auth(struct rpc_t *rpc)
         auth->uid  = xdr_read_long(m_in);
         auth->gid  = xdr_read_long(m_in);
         auth->len  = xdr_read_long(m_in);
+        /* RFC 5531: at most 16 groups */
+        if (auth->len > NUM_GROUPS) {
+            nn_log("RPC: %u groups in the credentials\n", auth->len);
+            return false;
+        }
         len -= auth->len * 4;
         for (i = 0; i < auth->len; i++) {
-            uint32_t gid = xdr_read_long(m_in);
-            if (i < NUM_GROUPS) {
-                auth->gids[i] = gid;
-            }
+            auth->gids[i] = xdr_read_long(m_in);
         }
         if (rpc->ft) {
             vfs_set_process_uid_gid(rpc->ft->vfs, auth->uid, auth->gid);
@@ -158,6 +161,7 @@ static void rpc_read_auth(struct rpc_t *rpc)
     if (len) {
         nn_log("RPC: authentication decode error\n");
     }
+    return true;
 }
 
 /*
@@ -193,10 +197,13 @@ static bool rpc_input(struct rpc_prog_t *prog)
         rpc->proc = xdr_read_long(m_in);
         rpc->auth.flavor = xdr_read_long(m_in);
         rpc->auth.length = xdr_read_long(m_in);
-        rpc_read_auth(rpc);
-
-        rpc->verif.flavor = xdr_read_long(m_in);
-        rpc->verif.length = xdr_read_long(m_in);
+        rpc->verif.length = 0;
+        if (rpc->auth.length <= RPC_MAX_AUTH_BYTES && rpc_read_auth(rpc)) {
+            rpc->verif.flavor = xdr_read_long(m_in);
+            rpc->verif.length = xdr_read_long(m_in);
+        } else {
+            rpc->auth.length = ~0u;     /* refused below */
+        }
         if (rpc->auth.length > RPC_MAX_AUTH_BYTES ||
             rpc->verif.length > RPC_MAX_AUTH_BYTES ||
             xdr_read_skip(m_in, rpc->verif.length) < 0) {
