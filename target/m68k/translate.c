@@ -4824,7 +4824,9 @@ DISAS_INSN(mmu030)
             gen_addr_fault(s);
             return;
         }
-        gen_helper_pmove(tcg_env, tcg_constant_i32(ext), addr);
+        /* the next instruction: where a bad TC's exception returns to */
+        gen_helper_pmove(tcg_env, tcg_constant_i32(ext), addr,
+                         tcg_constant_i32(s->pc));
         break;
     case 1: /* PFLUSH, PLOAD */
         if (((ext >> 10) & 7) == 0 || ((ext >> 10) & 7) == 6) {

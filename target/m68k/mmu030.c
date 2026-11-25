@@ -120,6 +120,29 @@ static void mmu030_write(CPUM68KState *env, hwaddr addr, uint32_t val)
 }
 
 /*
+ * A TC the MMU can work with: a page of 256 bytes or more, and the
+ * initial shift, the table indexes up to the first that is 0, and the
+ * page size together cover the 32 bits of an address
+ */
+static bool mmu030_tc_valid(uint32_t tc)
+{
+    int bits = ((tc >> 16) & 15) + ((tc >> 20) & 15);
+
+    if (((tc >> 20) & 15) < 8) {
+        return false;
+    }
+    for (int i = 0; i < 4; i++) {
+        int w = (tc >> (12 - 4 * i)) & 15;
+
+        if (!w) {
+            break;
+        }
+        bits += w;
+    }
+    return bits == 32;
+}
+
+/*
  * Translate addr. Returns the MMUSR the walk ends with: 0 (or only the
  * level count, the M and T bits) means the access may go on. max_level
  * limits the walk for PTEST (7: the whole table); *desc gets the address
@@ -154,6 +177,11 @@ static uint16_t mmu030_walk(CPUM68KState *env, uint32_t addr, int access_type,
     int level = 0;
 
     *desc = 0;
+    if (!mmu030_tc_valid(tc)) {
+        /* PTEST with a TC that PMOVE would not take */
+        mmusr = MMUSR_I;
+        goto done;
+    }
     if (tc & TC_FCL) {
         widths[nlevels++] = 3;      /* the function code level */
     }
@@ -449,8 +477,30 @@ static int mmu030_ext_fc(CPUM68KState *env, uint16_t ext)
     return f ? env->dfc & 7 : env->sfc & 7;
 }
 
-/* PMOVE: ext gives the register and the direction; addr the memory */
-void HELPER(pmove)(CPUM68KState *env, uint32_t ext, uint32_t addr)
+/*
+ * The MMU configuration exception, after the PMOVE as a trap: a format
+ * $2 frame with the PMOVE's address, returning to the next instruction
+ */
+static G_NORETURN void mmu030_config_exception(CPUM68KState *env,
+                                               uint32_t next_pc,
+                                               uintptr_t ra)
+{
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = EXCP_MMU_CONF;
+    cpu_restore_state(cs, ra);
+    env->cc_op = CC_OP_FLAGS;
+    env->mmu.ar = env->pc;
+    env->pc = next_pc;
+    cpu_loop_exit(cs);
+}
+
+/*
+ * PMOVE: ext gives the register and the direction; addr the memory;
+ * next_pc is the instruction after it
+ */
+void HELPER(pmove)(CPUM68KState *env, uint32_t ext, uint32_t addr,
+                   uint32_t next_pc)
 {
     CPUState *cs = env_cpu(env);
     uintptr_t ra = GETPC();
@@ -480,6 +530,12 @@ void HELPER(pmove)(CPUM68KState *env, uint32_t ext, uint32_t addr)
             } else {
                 env->mmu030.tc = cpu_ldl_be_data_ra(env, addr, ra);
                 tlb_flush(cs);
+                if ((env->mmu030.tc & TC_E) &&
+                    !mmu030_tc_valid(env->mmu030.tc)) {
+                    /* the MMU stays off */
+                    env->mmu030.tc &= ~TC_E;
+                    mmu030_config_exception(env, next_pc, ra);
+                }
             }
             return;
         }

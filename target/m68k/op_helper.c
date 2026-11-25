@@ -401,6 +401,7 @@ static void m68k_interrupt_all(CPUM68KState *env, int is_hw)
     case EXCP_DIV0:
     case EXCP_TRACE:
     case EXCP_TRAPCC:
+    case EXCP_MMU_CONF:     /* the 68030's, after a PMOVE to TC */
         do_stack_frame(env, &sp, 2, oldsr, env->mmu.ar, env->pc);
         break;
 
