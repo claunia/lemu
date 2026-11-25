@@ -210,8 +210,48 @@ static char* path_relative(char* path, const char* base_path) {
     }
 }
 
+/* The shared folder on the host: every host path must be in it */
+static char vfs_host_base[FILENAME_MAX];
+
+/*
+ * A name that stays in its folder on the host: not '.' or '..', and on
+ * Windows no separator, drive or stream, and no device name
+ */
+static bool vfs_name_ok(const char* name) {
+    if (!name[0] || !strcmp(name, ".") || !strcmp(name, "..")) {
+        return false;
+    }
+#ifdef _WIN32
+    static const char* const devices[] = {
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+    size_t stem = strcspn(name, ". ");
+    size_t i;
+
+    for (i = 0; name[i]; i++) {
+        if ((unsigned char)name[i] < 32 || strchr("\\:*?\"<>|", name[i])) {
+            return false;
+        }
+    }
+    /* Windows drops dots and spaces at the end: "..." would be ".." */
+    if (name[i - 1] == '.' || name[i - 1] == ' ') {
+        return false;
+    }
+    for (i = 0; i < G_N_ELEMENTS(devices); i++) {
+        if (strlen(devices[i]) == stem &&
+            !g_ascii_strncasecmp(name, devices[i], stem)) {
+            return false;
+        }
+    }
+#endif
+    return true;
+}
+
 static size_t make_host_path(const char* host_base, char* vfs_path, char* host_path) {
     char* p;
+    size_t len;
         
     if (strchr(vfs_path, '/') == vfs_path) {
         vfs_path++;  /* skip leading '/' */
@@ -228,11 +268,27 @@ static size_t make_host_path(const char* host_base, char* vfs_path, char* host_p
     
     while ((p = strchr(vfs_path, '/'))) {
         p[0] = '\0';
+        if (!vfs_name_ok(vfs_path)) {
+            goto bad;
+        }
         vfscat(host_path, vfs_path, FILENAME_MAX);
         vfscat(host_path, HOST_SEPARATOR, FILENAME_MAX);
         vfs_path = p + 1;
     }
-    return vfscat(host_path, vfs_path, FILENAME_MAX);
+    if (vfs_path[0] && !vfs_name_ok(vfs_path)) {
+        goto bad;
+    }
+    len = vfscat(host_path, vfs_path, FILENAME_MAX);
+    if (len >= FILENAME_MAX) {
+        /* cut short it would name another file */
+        host_path[0] = '\0';
+    }
+    return len;
+
+bad:
+    nn_log("VFS: refused name '%s'\n", vfs_path);
+    host_path[0] = '\0';
+    return 0;
 }
 
 size_t vfs_to_host_path(struct vfs_t* vfs, struct path_t* path) {
@@ -280,9 +336,63 @@ size_t vfs_to_vfs_path(struct vfs_t* vfs, struct path_t* path) {
     return make_vfs_path(vfs->base_path.vfs, host_path, path->vfs, host_path == path->host);
 }
 
-static int host_path_is_directory(const char* host_path) {
+/* Is it a link: a symbolic link, or on Windows any reparse point? */
+static int host_is_link(const char* host_path, int* exists) {
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(host_path);
+
+    *exists = attr != INVALID_FILE_ATTRIBUTES;
+    return *exists && (attr & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
     struct stat fstat;
-    if (stat(host_path, &fstat) == 0)
+
+    *exists = lstat(host_path, &fstat) == 0;
+    return *exists && S_ISLNK(fstat.st_mode);
+#endif
+}
+
+/*
+ * The guest makes links with any target, so the host must never follow
+ * one: a path is good when it is in the shared folder and none of its
+ * folders is a link. With follow, the last part may not be a link
+ * either, as the call would follow it. Links are for the guest to
+ * follow, by READLINK.
+ */
+static int vfs_check(const struct path_t* path, int follow) {
+    char buf[FILENAME_MAX];
+    size_t base = strlen(vfs_host_base);
+    size_t len = strlen(path->host);
+    size_t i = base;
+
+    if (!base || len >= sizeof(buf) || strncmp(path->host, vfs_host_base, base) ||
+        (path->host[base] && strncmp(path->host + base, HOST_SEPARATOR,
+                                     strlen(HOST_SEPARATOR)))) {
+        return EACCES;
+    }
+    memcpy(buf, path->host, len + 1);
+    while (i < len) {
+        char* sep = strstr(buf + i + 1, HOST_SEPARATOR);
+        size_t end = sep ? (size_t)(sep - buf) : len;
+        char c = buf[end];
+        int exists, link;
+
+        buf[end] = '\0';
+        link = host_is_link(buf, &exists);
+        buf[end] = c;
+        if (!exists) {
+            return 0;   /* nothing after this exists either */
+        }
+        if (link && (end < len || follow)) {
+            return ELOOP;
+        }
+        i = end;
+    }
+    return 0;
+}
+
+static int host_path_is_directory(const struct path_t* path) {
+    struct stat fstat;
+    if (vfs_check(path, 1) == 0 && stat(path->host, &fstat) == 0)
         return S_ISDIR(fstat.st_mode);
     return 0;
 }
@@ -295,16 +405,49 @@ struct file_t {
     FILE* file;
 };
 
+/* fopen(), but never through a link */
+static FILE* host_fopen(const struct path_t* path, const char* mode) {
+#ifdef _WIN32
+    return fopen(path->host, mode);
+#else
+    int flags, fd;
+    FILE* f;
+
+    if (!strcmp(mode, "rb")) {
+        flags = O_RDONLY;
+    } else if (!strcmp(mode, "r+b")) {
+        flags = O_RDWR;
+    } else {
+        flags = O_WRONLY | O_CREAT | O_TRUNC;
+    }
+    fd = open(path->host, flags | O_NOFOLLOW | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        return NULL;
+    }
+    f = fdopen(fd, mode);
+    if (!f) {
+        close(fd);
+    }
+    return f;
+#endif
+}
+
 static struct file_t* file_open(const struct path_t* path, const char* mode) {
     struct file_t* file = (struct file_t*)g_malloc(sizeof(struct file_t));
+    int err = vfs_check(path, 1);
     
     file->restore_stat = 0;
-    file->file = fopen(path->host, mode);
+    if (err) {
+        file->file = NULL;
+        errno = err;
+        return file;
+    }
+    file->file = host_fopen(path, mode);
     if (file->file == NULL && errno == EACCES) {
         file->restore_stat = 1;
         vfs_stat(path, &file->fstat);
         vfs_chmod(path, file->fstat.st_mode);
-        file->file = fopen(path->host, mode);
+        file->file = host_fopen(path, mode);
     }
     return file;
 }
@@ -361,7 +504,7 @@ uint32_t vfs_get_parent_gid(struct vfs_t* vfs, const struct path_t* path) {
     if (vfs_path_is_absolute(path->vfs)) {
         vfs_get_parent_path(path->vfs, parent_path.vfs);
         vfs_to_host_path(vfs, &parent_path);
-        if (host_path_is_directory(parent_path.host)) {
+        if (host_path_is_directory(&parent_path)) {
             struct sattr_t sattr;
             vfs_get_sattr(vfs, &parent_path, &sattr);
             return sattr.gid;
@@ -418,6 +561,11 @@ static int get_error(int result) {
 }
 
 int vfs_chmod(const struct path_t* path, mode_t mode) {
+    int err = vfs_check(path, 0);
+
+    if (err) {
+        return err;
+    }
 #ifdef _WIN32
     return 0; /* not supported */
 #else
@@ -426,6 +574,11 @@ int vfs_chmod(const struct path_t* path, mode_t mode) {
 }
 
 int vfs_utimes(const struct path_t* path, struct timeval times[2]) {
+    int err = vfs_check(path, 0);
+
+    if (err) {
+        return err;
+    }
 #ifdef _WIN32
     return 0; /* not supported */
 #else
@@ -434,6 +587,11 @@ int vfs_utimes(const struct path_t* path, struct timeval times[2]) {
 }
 
 int vfs_stat(const struct path_t* path, struct stat* fstat) {
+    int err = vfs_check(path, 0);
+
+    if (err) {
+        return err;
+    }
 #ifdef _WIN32
     return get_error(stat(path->host, fstat));
 #else
@@ -466,6 +624,10 @@ static const char* vfs_get_filename(const char* vfs_path) {
 void vfs_set_sattr(struct vfs_t* vfs, const struct path_t* path, struct sattr_t* sattr) {
 #if HAVE_SYS_XATTR_H
     char buffer[128];
+
+    if (vfs_check(path, 0)) {
+        return;
+    }
     const char* fname = vfs_get_filename(path->vfs);
     
     assert(strcmp(fname, ".") && strcmp(fname, ".."));
@@ -486,20 +648,19 @@ void vfs_get_sattr(struct vfs_t* vfs, const struct path_t* path, struct sattr_t*
     char buffer[128];
     memset(buffer, 0, sizeof(buffer));
 #if HAVE_LXETXATTR
-    if (lgetxattr(path->host, NFSD_ATTRS, buffer, sizeof(buffer) - 1) > 0)
+    if (vfs_check(path, 0) == 0 && lgetxattr(path->host, NFSD_ATTRS, buffer, sizeof(buffer) - 1) > 0)
 #else
-    if (getxattr(path->host, NFSD_ATTRS, buffer, sizeof(buffer), 0, XATTR_NOFOLLOW) > 0)
+    if (vfs_check(path, 0) == 0 &&
+        getxattr(path->host, NFSD_ATTRS, buffer, sizeof(buffer), 0, XATTR_NOFOLLOW) > 0)
 #endif
         deserialize(buffer, sattr);
     else
 #endif
     {
         struct stat fstat;
-#ifdef _WIN32
-        stat(path->host, &fstat);
-#else
-        lstat(path->host, &fstat);
-#endif
+
+        memset(&fstat, 0, sizeof(fstat));
+        vfs_stat(path, &fstat);
         fstat.st_uid = vfs->uid;
         fstat.st_gid = vfs->gid;
         fstat.st_mode |= S_ISDIR(fstat.st_mode) ? 0755 : 0644; /* strcmp(vfs->base_path.vfs, path->vfs) ? 0 : 0755; */
@@ -556,7 +717,10 @@ int vfs_readlink(const struct path_t* path, struct path_t* result) {
     struct stat sb;
     size_t  bufsiz;
     ssize_t nbytes;
+    int err = vfs_check(path, 0);
     
+    if (err)
+        return err;
     if (lstat(path->host, &sb) == -1)
         return errno;
     
@@ -625,26 +789,49 @@ int vfs_create(const struct path_t* path, uint8_t* data, uint32_t len) {
 }
 
 int vfs_remove(const struct path_t* path) {
-    return get_error(remove(path->host));
+    int err = vfs_check(path, 0);
+
+    return err ? err : get_error(remove(path->host));
 }
 
 int vfs_rename(const struct path_t* path_from, const struct path_t* path_to) {
-    return get_error(rename(path_from->host, path_to->host));
+    int err = vfs_check(path_from, 0);
+
+    if (!err) {
+        err = vfs_check(path_to, 0);
+    }
+    return err ? err : get_error(rename(path_from->host, path_to->host));
 }
 
 int vfs_link(const struct path_t* path_from, const struct path_t* path_to, int soft) {
 #ifdef _WIN32
     return EACCES; /* not supported */
 #else
-    const char* from = soft ? path_from->vfs : path_from->host;
-    const char* to   = path_to->host;
-    
-    if(soft) return get_error(symlink(from, to));
-    else     return get_error(link   (from, to));
+    int err = vfs_check(path_to, 0);
+
+    if (err) {
+        return err;
+    }
+    /* a symbolic link keeps what the guest gave: the host never follows it */
+    if (soft) {
+        return get_error(symlink(path_from->vfs, path_to->host));
+    }
+    err = vfs_check(path_from, 0);
+    if (err) {
+        return err;
+    }
+    /* a hard link to a symbolic link links the link, not its target */
+    return get_error(linkat(AT_FDCWD, path_from->host, AT_FDCWD,
+                            path_to->host, 0));
 #endif
 }
 
 int vfs_mkdir(const struct path_t* path) {
+    int err = vfs_check(path, 0);
+
+    if (err) {
+        return err;
+    }
 #ifdef _WIN32
     return get_error(mkdir(path->host));
 #else
@@ -653,14 +840,27 @@ int vfs_mkdir(const struct path_t* path) {
 }
 
 int vfs_rmdir(const struct path_t* path) {
-    return get_error(rmdir(path->host));
+    int err = vfs_check(path, 0);
+
+    return err ? err : get_error(rmdir(path->host));
 }
 
 DIR* vfs_opendir(const struct path_t* path) {
+    int err = vfs_check(path, 1);
+
+    if (err) {
+        errno = err;
+        return NULL;
+    }
     return opendir(path->host);
 }
 
 int vfs_statfs(const struct path_t* path, struct statvfs* fsstat) {
+    int err = vfs_check(path, 1);
+
+    if (err) {
+        return err;
+    }
 #ifndef _WIN32
     return get_error(statvfs(path->host, fsstat));
 #else
@@ -680,7 +880,9 @@ int vfs_statfs(const struct path_t* path, struct statvfs* fsstat) {
 }
 
 int vfs_access(const struct path_t* path, int mode) {
-    return get_error(access(path->host, mode));
+    int err = vfs_check(path, 1);
+
+    return err ? err : get_error(access(path->host, mode));
 }
 
 /*----- VFS */
@@ -699,12 +901,14 @@ struct vfs_t* vfs_init(const char* host_path, const char* vfs_path_alias) {
             if (strcmp(p, HOST_SEPARATOR) == 0 && p != vfs->base_path.host) {
                 p[0] = '\0';
             }
+            vfscpy(vfs_host_base, vfs->base_path.host, sizeof(vfs_host_base));
         }
     }
     return vfs;
 }
 
 struct vfs_t* vfs_uninit(struct vfs_t* vfs) {
+    vfs_host_base[0] = '\0';
     g_free(vfs);
     return NULL;
 }

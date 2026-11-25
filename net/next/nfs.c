@@ -165,6 +165,10 @@ static int read_path(struct ft_t* ft, struct xdr_t* m_in, struct path_t* path, i
     if (len > MAXNAMELEN) {
         return NFSERR_NAMETOOLONG;
     }
+    /* one name, in the folder of the handle */
+    if (strchr(vfs_path, '/') || memchr(vfs_path, '\0', len)) {
+        return NFSERR_ACCES;
+    }
     if (vfs_join(path->vfs, vfs_path, sizeof(path->vfs)) >= sizeof(path->vfs)) {
         return NFSERR_NAMETOOLONG;
     }
