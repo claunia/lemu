@@ -1,5 +1,6 @@
 @echo off
 cd /d "%~dp0"
+rem Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 rem AmigaOS 4.1 on an ACube Sam440ep (sam440ep): PowerPC 440EP, 512 MB RAM. See run.sh.
 bin\windows-x86_64\qemu-system-ppc.exe ^
  -name "AmigaOS 4.1 440EP SAM440EP" ^
