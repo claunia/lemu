@@ -321,6 +321,8 @@ int hppa_get_physical_address(CPUHPPAState *env, vaddr addr, int mmu_idx,
     }
 
     if (unlikely(!(prot & type))) {
+        trace_hppa_tlb_ar_fault(env, addr, type, priv, ent->ar_type,
+                                ent->ar_pl1, ent->ar_pl2, ent->access_id);
         /* Not allowed -- Inst/Data Memory Access Rights Fault. */
         ret = (type & PAGE_EXEC) ? EXCP_IMP : EXCP_DMAR;
         goto egress;
