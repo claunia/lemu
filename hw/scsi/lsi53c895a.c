@@ -1629,7 +1629,12 @@ again:
             case 6: /* To SFBR */
                 if (operator)
                     op0 = lsi_reg_readb(s, reg);
-                op1 = data8;
+                /* reg OP SFBR TO SFBR, as HP-UX 11.23 c8xx uses */
+                if (insn & (1 << 23)) {
+                    op1 = s->sfbr;
+                } else {
+                    op1 = data8;
+                }
                 break;
             case 7: /* Read-modify-write */
                 if (operator)
