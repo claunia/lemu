@@ -305,26 +305,36 @@ static void ati_cp_2d(ATIVGAState *s, uint8_t op, const uint32_t *d,
 {
     uint32_t gmc, i = 0;
 
-    if (n < 1) {
-        return;
-    }
-    gmc = d[i++];
-    ati_cp_reg(s, DP_GUI_MASTER_CNTL, gmc);
-    if (gmc & GMC_SRC_PITCH_OFFSET && i < n) {
-        ati_cp_reg(s, SRC_PITCH_OFFSET, d[i++]);
-    }
-    if (gmc & GMC_DST_PITCH_OFFSET && i < n) {
-        ati_cp_reg(s, DST_PITCH_OFFSET, d[i++]);
-    }
-    if (gmc & GMC_SRC_CLIP && i < n) {
-        ati_cp_reg(s, SRC_SC_BOTTOM_RIGHT, d[i++]);
-    }
-    if (gmc & GMC_DST_CLIP && i + 1 < n) {
-        ati_cp_reg(s, SC_TOP_LEFT, d[i++]);
-        ati_cp_reg(s, SC_BOTTOM_RIGHT, d[i++]);
-    }
-    if (!ati_cp_brush(s, gmc, d, n, &i)) {
-        return;
+    if (op & 0x80) {
+        if (n < 1) {
+            return;
+        }
+        gmc = d[i++];
+        ati_cp_reg(s, DP_GUI_MASTER_CNTL, gmc);
+        if (gmc & GMC_SRC_PITCH_OFFSET && i < n) {
+            ati_cp_reg(s, SRC_PITCH_OFFSET, d[i++]);
+        }
+        if (gmc & GMC_DST_PITCH_OFFSET && i < n) {
+            ati_cp_reg(s, DST_PITCH_OFFSET, d[i++]);
+        }
+        if (gmc & GMC_SRC_CLIP && i < n) {
+            ati_cp_reg(s, SRC_SC_BOTTOM_RIGHT, d[i++]);
+        }
+        if (gmc & GMC_DST_CLIP && i + 1 < n) {
+            ati_cp_reg(s, SC_TOP_LEFT, d[i++]);
+            ati_cp_reg(s, SC_BOTTOM_RIGHT, d[i++]);
+        }
+        if (!ati_cp_brush(s, gmc, d, n, &i)) {
+            return;
+        }
+    } else {
+        /*
+         * The short forms (0x11 to 0x1c) leave out DP_GUI_MASTER_CNTL and
+         * what it chooses: they draw with the current one. AmigaOS 4.1
+         * draws its checkmarks with HOSTDATA_BLT (0x14).
+         */
+        gmc = (s->regs.dp_datatype & DP_SRC_DATATYPE) >> 4;
+        op |= 0x80;
     }
     /* mono sources take their colours from the packet */
     if (op == CP3_CNTL_HOSTDATA_BLT || GMC_SRC_DT(gmc) < 2) {
@@ -405,6 +415,16 @@ static void ati_cp_type3(ATIVGAState *s, uint32_t hdr, const uint32_t *d,
     case CP3_CNTL_SMALLTEXT:
     case CP3_CNTL_POLYSCANLINES:
     case CP3_CNTL_TRANS_BITBLT:
+    /* and their short forms, without the DP_GUI_MASTER_CNTL dword */
+    case CP3_CNTL_PAINT & 0x7f:
+    case CP3_CNTL_BITBLT & 0x7f:
+    case CP3_CNTL_SMALLTEXT & 0x7f:
+    case CP3_CNTL_HOSTDATA_BLT & 0x7f:
+    case CP3_CNTL_POLYLINE & 0x7f:
+    case CP3_CNTL_POLYSCANLINES & 0x7f:
+    case CP3_CNTL_PAINT_MULTI & 0x7f:
+    case CP3_CNTL_BITBLT_MULTI & 0x7f:
+    case CP3_CNTL_TRANS_BITBLT & 0x7f:
         ati_cp_2d(s, op, d, n);
         break;
     case 0x23:
@@ -415,7 +435,11 @@ static void ati_cp_type3(ATIVGAState *s, uint32_t hdr, const uint32_t *d,
         break;
     case CP3_LOAD_PALETTE:
     default:
-        qemu_log_mask(LOG_UNIMP, "ati_cp: packet 0x%02x\n", op);
+        qemu_log_mask(LOG_UNIMP, "ati_cp: packet 0x%02x:", op);
+        for (uint32_t j = 0; j < n; j++) {
+            qemu_log_mask(LOG_UNIMP, " %08x", d[j]);
+        }
+        qemu_log_mask(LOG_UNIMP, "\n");
         break;
     }
 }
