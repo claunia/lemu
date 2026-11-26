@@ -138,8 +138,11 @@ the guests set those for it. Linux takes the port on IRQ 9 too
   QEMU closes.
 - The Final Edition driver uploads 32 bit textures through a swap surface
   with an upper bound of 0xffffffff, and flips `SURFACE_CNTL` between the
-  16 and 32 bit swaps and none to read and write screen pixels; `ati-vga`
-  follows both (see `hw/display/ati.c`).
+  16 and 32 bit swaps and none for each bitmap it draws, many times for
+  each window. `ati-vga` reorders the video memory to follow, but the
+  screen only into the swap of its pixels' width: following the 32 bit
+  screen into no swap turned its red and blue around for a moment now and
+  then (see `hw/display/ati.c`).
 - The clock: `battclock.resource` 53.1 of the Final Edition looks for the
   clock chip in the VIA 686 (1106:0686) or the ATI SB600 (1002:438d) only,
   never in the Pegasos II's VT8231 (1106:8231), so the date starts at 1978,

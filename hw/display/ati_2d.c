@@ -489,6 +489,14 @@ void ati_2d_blt(ATIVGAState *s)
     ati_host_data_finish(s);
 
     if (src_source == DP_SRC_HOST || src_source == DP_SRC_HOST_BYTEALIGN) {
+        trace_ati_2d_host_blt((s->regs.dp_mix & GMC_ROP3_MASK) >> 16,
+                              src_source >> 8,
+                              (s->regs.dp_datatype & DP_SRC_DATATYPE) >> 16,
+                              ati_fb_offset(s, s->regs.dst_offset),
+                              s->regs.dst_x, s->regs.dst_y,
+                              s->regs.dst_width, s->regs.dst_height,
+                              s->regs.dp_src_frgd_clr,
+                              s->regs.dp_src_bkgd_clr);
         /* Begin a HOST_DATA blit */
         s->host_data.active = true;
         s->host_data.src_source = src_source;
@@ -501,6 +509,12 @@ void ati_2d_blt(ATIVGAState *s)
     trace_ati_2d_blt(ctx.rop3 >> 16, ctx.bpp, ctx.dst_offset, ctx.dst.x,
                      ctx.dst.y, ctx.dst.width, ctx.dst.height,
                      ctx.scissor.width, ctx.scissor.height);
+    trace_ati_2d_blt_src(src_source >> 8,
+                         (s->regs.dp_datatype & DP_SRC_DATATYPE) >> 16,
+                         ati_fb_offset(s, s->regs.src_offset), ctx.src.x,
+                         ctx.src.y, ctx.src_stride,
+                         ati_vram_xm(s, ati_fb_offset(s, s->regs.src_offset)),
+                         ati_vram_xm(s, ctx.dst_offset));
     if (ati_2d_do_blt(&ctx, s->use_pixman)) {
         ati_set_dirty(&ctx);
     }

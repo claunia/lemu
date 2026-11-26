@@ -238,6 +238,20 @@ static bool ati_xm_displayable(int xm, int bpp)
     }
 }
 
+/* the swap whose width is that of the pixels: 32 or 16 bit */
+static int ati_xm_of_depth(int bpp)
+{
+    switch (bpp) {
+    case 32:
+        return 3;
+    case 15:
+    case 16:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /*
  * The visible buffer goes back to the order of the memory around it, as
  * the display is about to show another one.
@@ -256,10 +270,15 @@ static void ati_vis_unpin(ATIVGAState *s)
  * covers is reordered to what the CPU now sees, so that the CPU and the
  * engines agree whichever swap was on when it was written. Drivers flip it
  * between bitmaps: AmigaOS writes 16 bit bitmaps with the 16 bit swap and
- * 32 bit ones with the 32 bit swap, and turns it off to read pixels. The
- * visible buffer follows only into an order the display can show (32 bit
- * pixels with no swap or the 32 bit one, 16 bit ones with no swap or the
- * 16 bit one); otherwise it keeps its order until it does.
+ * 32 bit ones with the 32 bit swap, and turns it off for 8 bit ones, many
+ * times for each window it opens.
+ * The visible buffer only follows into the swap of its pixels' width (the
+ * 32 bit one for 32 bit pixels, the 16 bit one for 16 bit ones), and out
+ * of an order the display cannot show (32 bit pixels with the 16 bit swap,
+ * 16 bit ones with the 32 bit swap) into one it can; otherwise it keeps
+ * its order. AmigaOS 4.1 still draws its 32 bit screen as with the 32 bit
+ * swap while it is off: following it there turned the screen's red and
+ * blue around for a moment now and then, and drew checkboxes wrongly.
  */
 static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
 {
@@ -312,7 +331,12 @@ static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
     }
     if (vis) {
         cur = s->vis_pin ? s->vis_xm : from;
-        target = ati_xm_displayable(to, bpp) ? to : cur;
+        if (to == ati_xm_of_depth(bpp) ||
+            (!ati_xm_displayable(cur, bpp) && ati_xm_displayable(to, bpp))) {
+            target = to;
+        } else {
+            target = cur;
+        }
         ati_vram_reswap(s, vlo, vhi, cur, target);
         s->vis_pin = target != to;
         s->vis_lo = vlo;
@@ -320,6 +344,8 @@ static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
         s->vis_xm = target;
         s->vga.big_endian_fb = target != 0;
     }
+    trace_ati_nonsurf_swap(from, to, vis, vlo, vhi, s->vis_pin,
+                           s->vga.big_endian_fb);
 }
 
 static inline void ati_reg_write_offs(uint32_t *reg, int offs,
