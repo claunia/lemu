@@ -19,12 +19,12 @@ export SDL_MOUSE_FOCUS_CLICKTHROUGH=1
 # BIOS. The CD-ROM drive is empty: change cd0 file.iso in the monitor.
 # The terminal holds the QEMU monitor.
 exec "$q" \
- -name "AmigaOS 4.1 G4 PEGASOS2" \
+ -name "AmigaOS 4.1 Final Edition G4 PEGASOS2" \
  -M pegasos2 -m 1024 \
  -drive if=pflash,file=flash.bin,format=raw \
  -rtc base=localtime \
  -vga none -device ati-vga,model=rv280,vgamem_mb=64,romfile=,bus=pci.0 \
- -drive file=aos41.qcow2,if=ide,index=0,format=qcow2 \
+ -drive file=aos41fe.qcow2,if=ide,index=0,format=qcow2 \
  -drive if=ide,index=2,media=cdrom,id=cd0 \
  -nic user,model=via-rhine \
  -nic user,model=mv643xx_eth \
