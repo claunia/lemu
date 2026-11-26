@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
 # SPDX-License-Identifier: GPL-2.0-or-later
-# AmigaOS 4.1 Final Edition on a Genesi/bPlan Pegasos II (pegasos2): MPC7457
+# AmigaOS 4.1 Final Edition Update 1 on a Genesi/bPlan Pegasos II (pegasos2): MPC7457
 # G4, 1 GB RAM, a 64 MB Radeon 9250 in the AGP slot, on-board VIA Rhine-II
 # Ethernet and VIA AC97 sound.
 cd "$(dirname "$0")" || exit 1
@@ -19,12 +19,12 @@ export SDL_MOUSE_FOCUS_CLICKTHROUGH=1
 # BIOS. The CD-ROM drive is empty: change cd0 file.iso in the monitor.
 # The terminal holds the QEMU monitor.
 exec "$q" \
- -name "AmigaOS 4.1 Final Edition G4 PEGASOS2" \
+ -name "AmigaOS 4.1 Final Edition Update 1 G4 PEGASOS2" \
  -M pegasos2 -m 1024 \
  -drive if=pflash,file=flash.bin,format=raw \
  -rtc base=localtime \
  -vga none -device ati-vga,model=rv280,vgamem_mb=64,romfile=,bus=pci.0 \
- -drive file=aos41fe.qcow2,if=ide,index=0,format=qcow2 \
+ -drive file=aos41feu1.qcow2,if=ide,index=0,format=qcow2 \
  -drive if=ide,index=2,media=cdrom,id=cd0 \
  -nic user,model=via-rhine \
  -nic user,model=mv643xx_eth \

@@ -8,20 +8,21 @@
 # read. The firmware is QEMU's Virtual Open Firmware (pc-bios/vof.bin) with
 # its device tree (pc-bios/dtb/pegasos2.dtb), which QEMU looks for in its data
 # folder.
-# aos41fe: AmigaOS 4.1 Final Edition. VMDIR holds the disk aos41fe.qcow2 and
-# flash.bin, the board's flash: bPlan's SmartFirmware (from its Pegasos II
-# update up050404) with the NVRAM set to boot hd:0 amigaboot.of.
+# aos41feu1: AmigaOS 4.1 Final Edition Update 1. VMDIR holds the disk
+# aos41feu1.qcow2 and flash.bin, the board's flash: bPlan's SmartFirmware
+# (from its Pegasos II update up050404) with the NVRAM set to boot hd:0
+# amigaboot.of.
 # BINDIR is STAGE/ppc from ../../release/stage.sh.
 # OUT names the kit: the folder inside is its file name without .tar.lz.
-# usage: mkrelease.sh morphos|aos41fe VMDIR BINDIR OUT.tar.lz
+# usage: mkrelease.sh morphos|aos41feu1 VMDIR BINDIR OUT.tar.lz
 set -e
-[ $# -eq 4 ] || { echo "usage: $0 morphos|aos41fe VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
+[ $# -eq 4 ] || { echo "usage: $0 morphos|aos41feu1 VMDIR BINDIR OUT.tar.lz" >&2; exit 1; }
 here=$(cd "$(dirname "$0")" && pwd)
 top=$(cd "$here/../../.." && pwd)
 os=$1 vm=$2 bin=$3
 case $os in
 morphos) disk=morphos.qcow2 boot=boot.img ;;
-aos41fe) disk=aos41fe.qcow2 boot=flash.bin ;;
+aos41feu1) disk=aos41feu1.qcow2 boot=flash.bin ;;
 *) echo "unknown OS: $os" >&2; exit 1 ;;
 esac
 for f in "$disk" "$boot"; do

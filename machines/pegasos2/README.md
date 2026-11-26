@@ -1,10 +1,10 @@
-# MorphOS 3.21 and AmigaOS 4.1 Final Edition on the Genesi/bPlan Pegasos II (pegasos2)
+# MorphOS 3.21 and AmigaOS 4.1 Final Edition Update 1 on the Genesi/bPlan Pegasos II (pegasos2)
 
 <!-- Copyright (c) 2026 Natalia Portillo <claunia@claunia.com> -->
 
 **TL;DR** `morphos/run.sh` boots MorphOS 3.21 on `-M pegasos2` through
-QEMU's Virtual Open Firmware; `aos41fe/run.sh` boots AmigaOS 4.1 Final
-Edition through bPlan's SmartFirmware in the board's flash. Graphics
+QEMU's Virtual Open Firmware; `aos41feu1/run.sh` boots AmigaOS 4.1 Final
+Edition Update 1 through bPlan's SmartFirmware in the board's flash. Graphics
 (Radeon 9250 in the AGP slot, 2D, 3D with transform and lighting, and
 command processor), network (the on-board VIA Rhine-II, and the MV64361's
 Gigabit Ethernet port under MorphOS) and sound (VIA AC97) work.
@@ -21,12 +21,12 @@ kit `morphos321pegasos2-lemu` (see [README.txt](morphos/README.txt));
 `VMDIR` holds the disk `morphos.qcow2` and `boot.img`, the boot image from
 the root of the MorphOS 3.21 CD.
 
-[aos41fe/run.sh](aos41fe/run.sh) and [run.cmd](aos41fe/run.cmd) start the kit
-`aos41fepegasos2-lemu` (see [README.txt](aos41fe/README.txt)):
+[aos41feu1/run.sh](aos41feu1/run.sh) and [run.cmd](aos41feu1/run.cmd) start the kit
+`aos41feu1pegasos2-lemu` (see [README.txt](aos41feu1/README.txt)):
 
-    sh release/mkrelease.sh aos41fe VMDIR STAGE/ppc aos41fepegasos2-lemu.tar.lz
+    sh release/mkrelease.sh aos41feu1 VMDIR STAGE/ppc aos41feu1pegasos2-lemu.tar.lz
 
-`VMDIR` holds the disk `aos41fe.qcow2` and `flash.bin`, the board's flash
+`VMDIR` holds the disk `aos41feu1.qcow2` and `flash.bin`, the board's flash
 with SmartFirmware and its NVRAM (see [Firmware](#firmware)).
 
 ## Files
@@ -37,7 +37,7 @@ with SmartFirmware and its NVRAM (see [Firmware](#firmware)).
 | `morphos.qcow2` | `if=ide`, primary master | The disk, 8 GB: DH0 `System` (1 GB) and DH1 `Work`, SFS\0, made by the MorphOS installer |
 | `bin/share/qemu/vof.bin`, `dtb/pegasos2.dtb` | (none) | QEMU's Virtual Open Firmware and the device tree it starts from, from `pc-bios/` |
 | `flash.bin` | `-drive if=pflash` | AmigaOS kit: the 512 KB flash at 0xfff00000, an AMD Am29F040: SmartFirmware 1.1 and its NVRAM |
-| `aos41fe.qcow2` | `if=ide`, primary master | AmigaOS kit: the disk, 8 GB: `BOOT` (64 MB, FFS, holds `amigaboot.of`) and DH0 `System` (FFS2, 512 byte blocks), made with Media Toolbox and the installer of the Pegasos2InstallCD-53.54 |
+| `aos41feu1.qcow2` | `if=ide`, primary master | AmigaOS kit: the disk, 8 GB: `BOOT` (64 MB, FFS, holds `amigaboot.of`) and DH0 `System` (FFS2, 512 byte blocks), made with Media Toolbox and the installer of the Pegasos2InstallCD-53.54 |
 
 ## Firmware
 
@@ -121,14 +121,15 @@ the guests set those for it. Linux takes the port on IRQ 9 too
   0xfff00100. With VOF the board puts code there that resets the machine
   through the VT8231's keyboard controller. `system_reset` works too.
 
-## AmigaOS 4.1 Final Edition notes
+## AmigaOS 4.1 Final Edition Update 1 notes
 
+- The disk has the Final Edition with Update 1 installed.
 - Drivers: `peg2ide.device`, `ATIRadeon.chip` with the compositing of
-  AmigaOS 4.1 Final Edition and `W3D_R200.library` for Warp3D,
-  `via-ac97.audio` (AHI) and the "VIA Rhine II" interface of the Internet
-  wizard (`DEVS:NetInterfaces/VIA-RHINE`). Its "Pegasos 2 built-in
-  Ethernet" is `via-rhine.device` too: AmigaOS 4.1 Final Edition has no
-  driver for the MV64361's Gigabit port.
+  AmigaOS 4.1 and `W3D_R200.library` for Warp3D, `via-ac97.audio` (AHI)
+  and the "VIA Rhine II" interface of the Internet wizard
+  (`DEVS:NetInterfaces/VIA-RHINE`). Its "Pegasos 2 built-in Ethernet" is
+  `via-rhine.device` too: AmigaOS 4.1 has no driver for the MV64361's
+  Gigabit port.
 - Install: boot the CD with `boot cd amigaboot.of` at the firmware prompt.
   In Media Toolbox make `BOOT` (FFS, 512 byte blocks) and DH0 (FFS2, long
   names, 512 byte blocks), save and reboot, then run the installer and
