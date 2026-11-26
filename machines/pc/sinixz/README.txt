@@ -1,14 +1,17 @@
 SINIX-Z 5.42 B20 for Intel (Siemens Nixdorf SVR4, 1996) on QEMU's PC (Pentium II, 128 MB, i440FX, Adaptec AHA-1540B SCSI, Cirrus CL-GD5436 with 2 MB, WD8003E Ethernet, Microsoft serial mouse)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
-SINIX-Z boots by itself to the X login (xdm). The Adaptec BIOS shows first, then the SINIX boot menu waits 7 seconds. Log in as root, password password. Click into the Login field before you type: the X login takes keys only after a click.
+SINIX-Z boots by itself to the X login (xdm). The Adaptec BIOS shows first, then the SINIX boot menu waits 7 seconds. Log in as root, password password (also comfax and magichit, password password; magicHIT is a demo and runs only as magichit). Click into the Login field before you type: the X login takes keys only after a click.
+This is a fresh install, made on QEMU from the original SINIX-Z 5.42 B20 floppies and CD with license key disks. No program is patched. It has all 10 sets of the CD (without the drivers for hardware this VM does not have): base, base extensions, LAN, add-ons, the X11R5 server, the SINIX/windows desktop (Motif, Mosaic, image tools, font server, ComFax, magicHIT), the communication set (mail, news and WWW clients), Spool, the license system and the European language supplement. Also the English and German man pages (man shows the English page first; the German ones are in /opt/man/de), PPP and the PC-NFS daemon. root's .profile adds /usr/ucb (man) and /usr/local/bin to PATH.
+C: the SINIX cc (licensed with its C-ATT 4.1 key), and GNU gcc 2.7.2.3, bash 2.05b and gzip 1.2.4 in /usr/local/bin. /usr/local/src/xhello.c is an X11 test program: cc -I/usr/local/include xhello.c -L/opt/X/lib -lX11 -lsocket -lnsl. The CD has the X libraries but no X headers: /usr/local/include/X11 has the X11R7 Xlib headers, so use the Xlib functions (XDefaultScreen), not the macros (DefaultScreen).
 X: SINIX/windows at 1152x864 with 256 colours, the X server's own Cirrus 5436 driver (set up in /usr/lib/X11/server/config).
 Network: QEMU user mode NAT. SINIX-Z keeps its fixed address 10.0.2.15 (host name sinix), and this computer is 10.0.2.2. telnet localhost 24023 reaches SINIX-Z, and port 24514 is its rsh port (514). These ports listen on this computer only. /.rhosts has "+ +": anyone who can reach port 24514 gets in as root without a password.
 CD: the SCSI CD drive (SCSI ID 4) is empty. To load an .iso, type in the QEMU monitor (the terminal): change cd0 FILE.iso.
 Mouse: Microsoft serial mouse on COM1. QEMU grabs it when you click in the window; Ctrl-Alt-G lets it go.
 Shut down as root with shutdown -y -g0 -i0. Quit QEMU when the console says "Reboot the system now."
 macOS: if the binary is blocked, run xattr -cr . in this folder.
-The same install for 86Box: sinixz542-86box.rar.
+An older install for 86Box (made with patched license checks): sinixz542-86box.rar.
+ComFax says "comFAX is not yet installed" at boot until you set it up with /home/comfax/bin/comfax-adm (it needs a fax modem). Spool says "No database" at boot until it is set up.
 
 AI agents (macOS, Linux): in this folder, claude mcp add lemu -s user -- "$PWD/bin/macos-arm64/qemu-system-i386" -mcp-bridge (on Linux bin/linux-x86_64 or bin/linux-aarch64) lets an agent such as Claude Code see the screen and use the keyboard, mouse and serial ports of the running VM. See MCP.md in the QEMU source.
 QEMU source: https://github.com/tenox7/lemu branch master (GPLv2, see bin/COPYING). qemu-system-i386 --version names the commit. LEMU changed for this kit: the Adaptec AHA-1540B ISA SCSI adapter (aha154x, new), edge-irqs on the PIC to keep IRQ 11 edge-triggered for it, and the Cirrus GD5436 (cirrus-vga-gd5436) with its four linear apertures, where the SINIX X server finds the BitBLT registers. fw/aha1540b320_330.bin is Adaptec's AHA-1540B BIOS 3.20 for port 330h.
