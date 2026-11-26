@@ -2,6 +2,7 @@
  * QEMU SDL display driver
  *
  * Copyright (c) 2003 Fabrice Bellard
+ * Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +70,7 @@ static void sdl2_2d_present(struct sdl2_console *scon)
     scon->updates = 0;
     SDL_RenderClear(scon->real_renderer);
     SDL_RenderCopy(scon->real_renderer, scon->texture, NULL, NULL);
+    sdl2_draw_cursor(scon);
     SDL_RenderPresent(scon->real_renderer);
 }
 
