@@ -229,6 +229,19 @@ static void sam_dcr_store_init(CPUPPCState *env, const int *dcrns, int n)
 
 /* PCI interrupts */
 
+/* port n of the SiI3114: ports 2 and 3 are not in PCIIDEState */
+static IDEBus *sam_sata_port(DeviceState *dev, int port)
+{
+    BusState *bus;
+
+    QLIST_FOREACH(bus, &dev->child_bus, sibling) {
+        if (IDE_BUS(bus)->bus_id == port) {
+            return IDE_BUS(bus);
+        }
+    }
+    g_assert_not_reached();
+}
+
 /* Behind the bridge: the pin on the bridge that a device's interrupt uses */
 static int sam_bridge_map_irq(PCIDevice *pci_dev, int pin)
 {
@@ -506,16 +519,24 @@ static void sam440ep_init(MachineState *machine)
         PCIIDEState *s = PCI_IDE(pci_create_simple(sec_bus,
                                                    PCI_DEVFN(SAM_DEV_SATA, 0),
                                                    "sii3114"));
-        DriveInfo *di;
+        DriveInfo *di[4];
 
-        di = drive_get_by_index(IF_IDE, 0);
-        if (di) {
-            ide_bus_create_drive(&s->bus[0], 0, di);
+        /*
+         * Drive index n is port n. Without an index 1, the next drive moves
+         * up to port 1, so that -cdrom (index 2) works on its own.
+         */
+        for (i = 0; i < 4; i++) {
+            di[i] = drive_get_by_index(IF_IDE, i);
         }
-        /* index 2 when there is no 1, so that -cdrom works */
-        di = drive_get_by_index(IF_IDE, 1) ?: drive_get_by_index(IF_IDE, 2);
-        if (di) {
-            ide_bus_create_drive(&s->bus[1], 0, di);
+        if (!di[1]) {
+            di[1] = di[2];
+            di[2] = di[3];
+            di[3] = NULL;
+        }
+        for (i = 0; i < 4; i++) {
+            if (di[i]) {
+                ide_bus_create_drive(sam_sata_port(DEVICE(s), i), 0, di[i]);
+            }
         }
     }
 

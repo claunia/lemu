@@ -38,6 +38,17 @@ work.
 | Ethernet, optional | `3c905c` in PCI slot 07 (`-nic ...,model=3c905c`) | `eth3com.device` |
 | Sound | `cs4281` at 0e, with an ALC655 codec | `cs4281.audio` (AHI) |
 
+The SiI3114 has four ports, and `if=ide` drive index *n* is port *n*
+(without an index 1, index 2 moves up to port 1, so `-cdrom` works).
+AmigaOS 4.1's `sii3114ide.device` 53.1 uses only ports 0 and 1: it is
+built for "4 chips, 2 ports, 2 units/port" and never looks at ports 2 and
+3. For a third drive, put a second SATA card in a PCI slot, which
+`sii3112ide.device` drives:
+
+    -device sii3112,id=sata2,bus=pci.1,addr=06 \
+    -drive if=none,id=cd0,media=cdrom \
+    -device ide-cd,drive=cd0,bus=sata2.0
+
 A PCI NIC must not go in slot 06: U-Boot gives that slot IRQ 50 (UIC1 input
 18), and the AmigaOS 4.1 kernel never enables any UIC1 input. Slot 07 is
 IRQ 29 on UIC0. A `-nic` or `-device` with no slot still lands in 07.
