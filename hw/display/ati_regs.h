@@ -362,6 +362,8 @@
 /* Radeon: bits 20-22 of CRTC_GEN_CNTL are the cursor mode */
 #define CRTC_CUR_MODE_MASK                      0x00700000
 #define CRTC_CUR_MODE_24BPP_AND                 0x00100000
+#define CRTC_CUR_MODE_ARGB_PREMULT              0x00200000
+#define CRTC_CUR_MODE_ARGB                      0x00300000
 #define CRTC2_EXT_DISP_EN                       0x01000000
 #define CRTC2_EN                                0x02000000
 #define CRTC2_DISP_REQ_EN_B                     0x04000000

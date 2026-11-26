@@ -469,24 +469,84 @@ static void ati_vga_switch_mode(ATIVGAState *s)
 }
 
 /*
- * Radeon cursor mode 1, which AIX uses on the ES1000: 64x64 pixels of 32
- * bits in the byte order of the frame buffer. The low 24 bits are a
- * colour and the top 8 an AND mask, as in the mono mode: a mask of 0
- * shows the colour, a mask of 0xff XORs it into the screen. The cursors
- * of AIX 5.3 only have opaque pixels and 0xff000000, which is clear.
+ * Radeon cursor modes other than mono: 64x64 pixels of 32 bits.
+ * Mode 1, which AIX uses on the ES1000: the low 24 bits are a colour and
+ * the top 8 an AND mask, as in the mono mode: a mask of 0 shows the
+ * colour, a mask of 0xff XORs it into the screen. The cursors of AIX 5.3
+ * only have opaque pixels and 0xff000000, which is clear.
+ * Modes 2 and 3 are ARGB, blended into the screen by their alpha: 2 with
+ * the colour already multiplied by it (X.org's cursors), 3 without
+ * (AmigaOS 4.1 and MorphOS, whose clear pixels are white with alpha 0).
  */
-static bool ati_cursor_24bpp(ATIVGAState *s)
+static uint32_t ati_cursor_mode(ATIVGAState *s)
 {
-    return s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
-           (s->regs.crtc_gen_cntl & CRTC_CUR_MODE_MASK) ==
-           CRTC_CUR_MODE_24BPP_AND;
+    if (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF) {
+        return 0;
+    }
+    return s->regs.crtc_gen_cntl & CRTC_CUR_MODE_MASK;
 }
 
+static bool ati_cursor_24bpp(ATIVGAState *s)
+{
+    return ati_cursor_mode(s) == CRTC_CUR_MODE_24BPP_AND;
+}
+
+static bool ati_cursor_argb(ATIVGAState *s)
+{
+    uint32_t mode = ati_cursor_mode(s);
+
+    return mode == CRTC_CUR_MODE_ARGB_PREMULT || mode == CRTC_CUR_MODE_ARGB;
+}
+
+static bool ati_cursor_32bpp(ATIVGAState *s)
+{
+    return ati_cursor_24bpp(s) || ati_cursor_argb(s);
+}
+
+/* a pixel as the display reads it, through the swap of its memory */
 static uint32_t ati_cursor_pixel(ATIVGAState *s, uint32_t off)
 {
-    const uint8_t *p = &s->vga.vram_ptr[off];
+    const uint8_t *p = s->vga.vram_ptr;
+    int xm = ati_vram_xm(s, off);
+    uint32_t v = 0;
 
-    return s->vga.big_endian_fb ? ldl_be_p(p) : ldl_le_p(p);
+    for (int i = 0; i < 4; i++) {
+        v |= (uint32_t)p[(off + i) ^ xm] << (i * 8);
+    }
+    return v;
+}
+
+/* an ARGB cursor pixel without the alpha multiplied in, as the UIs take */
+static uint32_t ati_cursor_argb_pixel(ATIVGAState *s, uint32_t px)
+{
+    uint32_t a = px >> 24, v = a << 24;
+
+    if (!a) {
+        return 0;
+    }
+    if (ati_cursor_mode(s) == CRTC_CUR_MODE_ARGB) {
+        return px;
+    }
+    for (int sh = 0; sh < 24; sh += 8) {
+        v |= MIN(((px >> sh) & 0xff) * 255 / a, 255) << sh;
+    }
+    return v;
+}
+
+/* blends an ARGB cursor pixel into a screen pixel */
+static uint32_t ati_cursor_blend(ATIVGAState *s, uint32_t px, uint32_t dst)
+{
+    uint32_t a = px >> 24, v = 0xff000000;
+    bool premult = ati_cursor_mode(s) == CRTC_CUR_MODE_ARGB_PREMULT;
+
+    for (int sh = 0; sh < 24; sh += 8) {
+        uint32_t c = (px >> sh) & 0xff, d = (dst >> sh) & 0xff;
+
+        c = premult ? c + d * (255 - a) / 255 :
+                      (c * a + d * (255 - a)) / 255;
+        v |= MIN(c, 255) << sh;
+    }
+    return v;
 }
 
 /*
@@ -506,6 +566,23 @@ static int ati_cursor_lines(uint32_t hv_offs)
     return 64 - (hv_offs & 0x3f);
 }
 
+/* what the host cursor is made from: its image, mode, colours and offsets */
+static uint32_t ati_cursor_hash(ATIVGAState *s)
+{
+    uint32_t img = s->regs.cur_offset & 0x07fffff0;
+    uint32_t len = ati_cursor_32bpp(s) ? 64 * 64 * 4 : 64 * 16;
+    uint32_t regs[] = {
+        ati_cursor_mode(s), s->regs.cur_color0, s->regs.cur_color1,
+        s->regs.cur_hv_offs, ati_vram_xm(s, img),
+    };
+    uint32_t h = qemu_cursor_shape(0, regs, sizeof(regs));
+
+    if (img + len <= s->vga.vram_size) {
+        h = qemu_cursor_shape(h, s->vga.vram_ptr + img, len);
+    }
+    return h;
+}
+
 /* Used by host side hardware cursor */
 static void ati_cursor_define(ATIVGAState *s)
 {
@@ -517,8 +594,11 @@ static void ati_cursor_define(ATIVGAState *s)
     if ((s->regs.cur_offset & BIT(31)) || s->cursor_guest_mode) {
         return; /* Do not update cursor if locked or rendered by guest */
     }
+    s->cursor_hash = ati_cursor_hash(s);
     srcoff = s->regs.cur_offset & 0x07fffff0;
-    if (ati_cursor_24bpp(s)) {
+    if (ati_cursor_32bpp(s)) {
+        bool argb = ati_cursor_argb(s);
+
         if (srcoff > s->vga.vram_size - 64 * 64 * 4) {
             return;
         }
@@ -527,13 +607,16 @@ static void ati_cursor_define(ATIVGAState *s)
         }
         for (int i = 0; i < 64; i++) {
             for (int j = 0; j < 64; j++) {
-                uint32_t px = 0xff000000; /* clear */
+                uint32_t px = argb ? 0 : 0xff000000; /* clear */
 
                 if (i < lines && j < 64 - xoff) {
                     px = ati_cursor_pixel(s, srcoff + i * 64 * 4 +
                                              (j + xoff) * 4);
                 }
-                if (!(px & 0xff000000)) {
+                if (argb) {
+                    s->cursor->data[i * 64 + j] =
+                        ati_cursor_argb_pixel(s, px);
+                } else if (!(px & 0xff000000)) {
                     s->cursor->data[i * 64 + j] = px | 0xff000000;
                 } else if (px & 0xffffff) {
                     /* the host cursor cannot XOR, show it black */
@@ -574,7 +657,7 @@ static bool ati_cursor_state(VGACommonState *vga, QemuCursorState *cs)
     ATIVGAState *s = container_of(vga, ATIVGAState, vga);
     uint32_t offs = s->regs.cur_hv_offs;
     uint32_t img = s->regs.cur_offset & 0x07fffff0;
-    uint32_t len = ati_cursor_24bpp(s) ? 64 * 64 * 4 : 64 * 16;
+    uint32_t len = ati_cursor_32bpp(s) ? 64 * 64 * 4 : 64 * 16;
 
     cs->visible = s->regs.crtc_gen_cntl & CRTC2_CUR_EN;
     /* less the part hidden beyond the left and top edges */
@@ -632,7 +715,9 @@ static void ati_cursor_draw_line(VGACommonState *vga, uint8_t *d, int scr_y)
     }
     dp = &dp[vga->hw_cursor_x];
     h = ((s->regs.crtc_h_total_disp >> 16) + 1) * 8;
-    if (ati_cursor_24bpp(s)) {
+    if (ati_cursor_32bpp(s)) {
+        bool argb = ati_cursor_argb(s);
+
         srcoff = s->cursor_offset + (scr_y - vga->hw_cursor_y) * 64 * 4;
         if (srcoff > s->vga.vram_size - 64 * 4) {
             return;
@@ -644,7 +729,9 @@ static void ati_cursor_draw_line(VGACommonState *vga, uint8_t *d, int scr_y)
             if (vga->hw_cursor_x + i >= h) {
                 return; /* end of screen, don't span to next line */
             }
-            if (px & 0xff000000) {
+            if (argb) {
+                dp[i] = ati_cursor_blend(s, px, dp[i]);
+            } else if (px & 0xff000000) {
                 dp[i] ^= px & 0xffffff;
             } else {
                 dp[i] = px | 0xff000000;
@@ -715,6 +802,15 @@ static void ati_vga_vblank_irq(void *opaque)
         s->regs.gen_int_status |= RADEON_CRTC2_VBLANK_STAT;
     }
     ati_vga_update_irq(s);
+    /*
+     * Guests also change the cursor's image in place, without writing a
+     * cursor register (busy pointers): the host's copy follows it.
+     */
+    if (!s->cursor_guest_mode && (s->regs.crtc_gen_cntl & CRTC2_CUR_EN) &&
+        !(s->regs.cur_offset & BIT(31)) &&
+        ati_cursor_hash(s) != s->cursor_hash) {
+        ati_cursor_define(s);
+    }
 }
 
 static inline uint32_t ati_reg_read_offs(uint32_t reg, int offs,
