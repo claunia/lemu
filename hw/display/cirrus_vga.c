@@ -1138,6 +1138,14 @@ static void cirrus_get_params(VGACommonState *s1,
     if (s->vga.cr[VGA_CRTC_MODE] & 0x04) {
         params->line_compare = params->line_compare * 2 + 1;
     }
+    /*
+     * Interlaced (CR1A bit 0): the counter counts the lines of one field.
+     * Without this, line compare 1023 wrapped a 1600x1200 interlaced
+     * screen to its top at line 1024 (SINIX-Z X server).
+     */
+    if (s->vga.cr[0x1a] & 0x01) {
+        params->line_compare = params->line_compare * 2 + 1;
+    }
 
     params->hpel = s->vga.ar[VGA_ATC_PEL];
     params->hpel_split = s->vga.ar[VGA_ATC_MODE] & 0x20;
