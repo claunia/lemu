@@ -41,13 +41,19 @@ static const int elroy_hpa_offsets[ELROY_NUM] = {
 static const char elroy_rope_nr[ELROY_NUM] = {
             0, 1, 4, 6 }; /* busnum path, e.g. [10:6] */
 
-/* On the A400 the second Elroy is connected to rope 2 */
+/*
+ * On the A400 the second Elroy is connected to rope 2. A Pluto has its
+ * LBAs (Mercury) at 0x20000 + rope * 0x2000, not at 0x30000 + rope *
+ * 0x2000: the HP-UX 11.31 graphics driver gvid uses that address.
+ */
 static int astro_elroy_hpa_offset(AstroState *s, int i)
 {
+    int offset = elroy_hpa_offsets[i];
+
     if (i == 1 && s->elroy1_on_rope2) {
-        return ELROY4_HPA - ASTRO_HPA;
+        offset = ELROY4_HPA - ASTRO_HPA;
     }
-    return elroy_hpa_offsets[i];
+    return s->pluto ? offset - 0x10000 : offset;
 }
 
 static int astro_elroy_rope_nr(AstroState *s, int i)
@@ -798,6 +804,17 @@ static void adjust_GMMIO_mapping(AstroState *s)
     }
 }
 
+/*
+ * Pluto registers that are not emulated: the rope registers at 0x1000
+ * (gvid reads 0x1040 and changes 0x1500 + rope * 8), and the ropes
+ * without an LBA at 0x20000 + rope * 0x2000 (Elroys cover the others).
+ */
+static bool astro_pluto_dummy(hwaddr addr)
+{
+    return (addr >= 0x1000 && addr < 0x2000) ||
+           (addr >= 0x20000 && addr < 0x30000);
+}
+
 static MemTxResult astro_chip_read_with_attrs(void *opaque, hwaddr addr,
                                              uint64_t *data, unsigned size,
                                              MemTxAttrs attrs)
@@ -809,6 +826,12 @@ static MemTxResult astro_chip_read_with_attrs(void *opaque, hwaddr addr,
 
     if (s->pluto && addr >= 0x2000 && addr < 0x3000) {
         addr += 0x20000 - 0x2000;       /* Pluto has its IOC at 0x2000 */
+    } else if (s->pluto && astro_pluto_dummy(addr)) {
+        val = (addr & 0x1fff) >= 0x40 && (addr & 0x1fff) < 0x50 &&
+              addr >= 0x20000 ? UINT64_MAX : 0;
+        *data = mask_32bit_val(addr, size, val);
+        trace_astro_chip_read(addr, size, *data);
+        return MEMTX_OK;
     }
 
     switch ((addr >> 3) << 3) {
@@ -908,6 +931,9 @@ static MemTxResult astro_chip_write_with_attrs(void *opaque, hwaddr addr,
 
     if (s->pluto && addr >= 0x2000 && addr < 0x3000) {
         addr += 0x20000 - 0x2000;       /* Pluto has its IOC at 0x2000 */
+    } else if (s->pluto && astro_pluto_dummy(addr)) {
+        trace_astro_chip_write(addr, size, val);
+        return MEMTX_OK;
     }
 
     trace_astro_chip_write(addr, size, val);
