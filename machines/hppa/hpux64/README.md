@@ -128,10 +128,73 @@ LEMU's SeaBIOS-hppa 27 with eight changes, from github.com/tenox7/seabios-hppa b
 8. `opt/console=graphics` also works with the PCI card on the Astro machines: the STI
    console on the card, as above.
 
+## HP-UX 11i v3 (B.11.31) on the A400
+
+11.31 on PA-RISC supports only zx1, REO and PAT machines. `-M A400,pluto=on` shows the
+A400's Astro as a Pluto (zx1) SBA. The MCOE June 2007 DVDs (2 discs) install and boot to
+login:
+
+```
+qemu-system-hppa -M A400,pluto=on -m 2048 -smp 1 -nographic \
+  -drive if=scsi,bus=0,index=6,file=hpux1131.qcow2,format=qcow2 \
+  -drive if=scsi,bus=0,index=2,media=cdrom,file=hp-ux-11.31-mcoe-06.2007-dvd1.iso \
+  -boot d -nic user,model=tulip
+```
+
+At about fileset 1125 of 1197 Ignite asks for media 2: in the monitor,
+`change scsi0-cd2 hp-ux-11.31-mcoe-06.2007-dvd2.iso raw read-only`, then answer 1.
+
+With `pluto=on`:
+- The firmware gives the SBA the Pluto IODC (hv 0x880). The IOC registers are also at
+  0x2000, as on a Pluto. IBASE and IMASK start as a 1 GB IOVA window at 1 GB, and the I/O
+  PDIR index is the page inside that window.
+- The SCSI card is a 53C875 (`lsi53c875`): the 11.31 c8xx driver takes the 53C875, 53C896
+  and 53C1010-66, but not the 53C895 or 53C895A.
+- The Diva serial card has the UART interrupt status byte at BAR 0 + 0x1b. 11.31 asio0_intr
+  reads it.
+- fcnv from a doubleword reads fr0 as zero (`target/hppa`, for all machines). Before, it
+  read the FP status: the aC++ library sized a string from it, `operator new` threw in a
+  static constructor, and evmd aborted at boot (S020evm FAILED).
+- PAT firmware (branch `hpux1131`): 32-bit LMMIO ranges in the I/O view, -7 (PDC_NE_CELL_MOD)
+  at the end of the module list, PDC_PAT_IO 0, the hint table and the hard-fail calls, and
+  PDC_IODC_READ of a PCI function by its config address (else lvlnboot stops with "IODC
+  max address", as on 11.23 before fix 2).
+
+### CDE on 11.31
+
+The 11.31 PA X server has no Artist driver. It has the XFree86 4.2 radeon driver, and the
+gvid driver takes a Radeon 7500. Add the card (the console stays on the serial port):
+
+```
+  -device ati-vga,model=rv200,x-linear-aper-size=0x4000000,guest_hwcursor=true \
+  -serial mon:stdio
+```
+
+- `model=rv200` is 1002:5157, emulated as the RV100. gvid maps 64 MB from every memory BAR
+  of this card, so the aperture is 64 MB too.
+- `guest_hwcursor=true`: QEMU draws the mouse pointer into the screen. Without it, SDL and
+  cocoa show a host cursor and move the host pointer to where X put its pointer. X doubles
+  fast moves, so the pointer jumps. The AIX ES1000 VMs use it for the same reason.
+- X uses a 32 bpp big endian frame buffer (SURFACE_CNTL swaps), sends images through
+  HOST_DATA with DP_DATATYPE HOST_BIG_ENDIAN_EN, and has a mono hardware cursor that it
+  writes through the swapping aperture.
+- The Elroys are Mercury LBAs (hv 0x783) at SBA + 0x20000 + rope * 0x2000, as on an
+  rp34x0. gvid looks for them there.
+- The firmware puts the small BARs right above the big ones. The kernel refuses gvid's
+  64 MB map of the register BAR if it overlaps the frame buffer or the I/O ports.
+- The PLL registers (CLOCK_CNTL_INDEX and DATA) work. The X server waits for
+  PPLL_REF_DIV.
+- USB is a NEC OHCI: 11.31 does not take the Apple one. Kernel modules: `hcd`, `hub`,
+  `hid`, `usbd`, `gvid`, `gvid_core` (kcmodule ...=static).
+- Install CDE-English from DVD 1: Ignite leaves it out.
+- A boot without a graphics card makes `/usr/dt/config/dtrc.d/20_graph_conf` comment out
+  the Local line in `/etc/dt/config/Xservers`. It does not put it back. Before the next
+  boot with the card: `cp /usr/dt/config/Xservers /etc/dt/config/Xservers`.
+
 ## Not working yet
 
-- HP-UX 11i v3 (B.11.31): "ccio/sba driver not found". It needs PAT firmware.
-- A400: PAT is not complete (`pat_init_cell` and others).
+- HP-UX 11.31: PDC_PAT_IO 13 and PDC_PAT_COMPLEX 0 and 13 are not there.
+- A400 without `pluto`: PAT is not complete (`pat_init_cell` and others).
 - With the graphics console, the firmware's boot menu reads only the serial port (no USB
   keyboard in the 64-bit firmware).
 - Crash dumps through IODC: ENTRY_IO on the Elroy returns BAD_OPTION.

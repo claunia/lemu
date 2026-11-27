@@ -346,6 +346,7 @@ struct LSIState {
 
 #define TYPE_LSI53C810  "lsi53c810"
 #define TYPE_LSI53C895A "lsi53c895a"
+#define TYPE_LSI53C875  "lsi53c875"
 
 OBJECT_DECLARE_SIMPLE_TYPE(LSIState, LSI53C895A)
 
@@ -2775,10 +2776,28 @@ static const TypeInfo lsi53c810_info = {
     .class_init    = lsi53c810_class_init,
 };
 
+/*
+ * The 53C895A model with the PCI ID of a 53C875. HP-UX 11.31 c8xx takes the
+ * 53C875, 53C896 and 53C1010-66, and turns down the 53C895 and 53C895A.
+ */
+static void lsi53c875_class_init(ObjectClass *klass, const void *data)
+{
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+
+    k->device_id = PCI_DEVICE_ID_LSI_53C875;
+}
+
+static const TypeInfo lsi53c875_info = {
+    .name          = TYPE_LSI53C875,
+    .parent        = TYPE_LSI53C895A,
+    .class_init    = lsi53c875_class_init,
+};
+
 static void lsi53c895a_register_types(void)
 {
     type_register_static(&lsi_info);
     type_register_static(&lsi53c810_info);
+    type_register_static(&lsi53c875_info);
 }
 
 type_init(lsi53c895a_register_types)
