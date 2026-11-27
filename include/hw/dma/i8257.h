@@ -38,6 +38,8 @@ struct I8257State {
     uint8_t counth[4];
     uint8_t stop[4][3];
     uint8_t ext_mode[4];
+    /* the EISA extended mode register sets each channel's width */
+    bool ext_mode_on;
     /* 82378/82374 scatter-gather, per channel */
     uint32_t sg_ptr[4];         /* descriptor table pointer */
     uint32_t sg_addr[4];        /* current buffer: address */

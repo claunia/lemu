@@ -293,8 +293,8 @@ static void jensen_isp_write(void *opaque, hwaddr addr,
         }
         return;
     /*
-     * The extended mode registers at 0x40b and 0x4d6 are the common DMA
-     * model's, which sets each channel's width from them.
+     * The extended mode registers at 0x40b and 0x4d6 are ignored: the
+     * common DMA model has them only when its ext-mode property is on.
      */
     }
     if (addr >= 0x401 && addr <= 0x407 && (addr & 1)) {

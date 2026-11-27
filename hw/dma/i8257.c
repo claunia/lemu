@@ -131,7 +131,7 @@ static uint32_t i8257_read_pageh(void *opaque, uint32_t nport)
  */
 static int i8257_chan_shift(I8257State *d, int ichan)
 {
-    if (d->pageh_base < 0) {
+    if (!d->ext_mode_on || d->pageh_base < 0) {
         return d->dshift;
     }
     return ((d->ext_mode[ichan] >> 2) & 3) == 1;
@@ -809,22 +809,50 @@ static const VMStateDescription vmstate_i8257_eisa = {
     }
 };
 
+static bool i8257_ext_mode_needed(void *opaque)
+{
+    I8257State *d = opaque;
+
+    return d->ext_mode_on && d->pageh_base >= 0;
+}
+
 static const VMStateDescription vmstate_i8257_ext_mode = {
     .name = "dma/ext-mode",
     .version_id = 1,
     .minimum_version_id = 1,
-    .needed = i8257_eisa_needed,
+    .needed = i8257_ext_mode_needed,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT8_ARRAY(ext_mode, I8257State, 4),
         VMSTATE_END_OF_LIST()
     }
 };
 
+/* only once a scatter-gather list has been used */
+static bool i8257_sg_needed(void *opaque)
+{
+    I8257State *d = opaque;
+    int i;
+
+    if (d->pageh_base < 0) {
+        return false;
+    }
+    if (d->sg_irq) {
+        return true;
+    }
+    for (i = 0; i < 4; i++) {
+        if (d->sg_status[i] || d->sg_ptr[i] || d->sg_addr[i] ||
+            d->sg_len[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static const VMStateDescription vmstate_i8257_sg = {
     .name = "dma/sg",
     .version_id = 1,
     .minimum_version_id = 1,
-    .needed = i8257_eisa_needed,
+    .needed = i8257_sg_needed,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(sg_ptr, I8257State, 4),
         VMSTATE_UINT32_ARRAY(sg_addr, I8257State, 4),
@@ -883,11 +911,13 @@ static void i8257_realize(DeviceState *dev, Error **errp)
                               "dma-stop", 16);
         memory_region_add_subregion(isa_address_space_io(isa),
                                     0x4e0 + (d->dshift << 4), &d->stop_io);
-        memory_region_init_io(&d->ext_mode_io, OBJECT(dev), &ext_mode_io_ops,
-                              d, "dma-ext-mode", 1);
-        memory_region_add_subregion(isa_address_space_io(isa),
-                                    d->dshift ? 0x4d6 : 0x40b,
-                                    &d->ext_mode_io);
+        if (d->ext_mode_on) {
+            memory_region_init_io(&d->ext_mode_io, OBJECT(dev),
+                                  &ext_mode_io_ops, d, "dma-ext-mode", 1);
+            memory_region_add_subregion(isa_address_space_io(isa),
+                                        d->dshift ? 0x4d6 : 0x40b,
+                                        &d->ext_mode_io);
+        }
     }
 
     memory_region_init_io(&d->cont_io, OBJECT(isa), &cont_io_ops, d,
@@ -907,6 +937,7 @@ static const Property i8257_properties[] = {
     DEFINE_PROP_INT32("page-base", I8257State, page_base, 0x80),
     DEFINE_PROP_INT32("pageh-base", I8257State, pageh_base, 0x480),
     DEFINE_PROP_INT32("dshift", I8257State, dshift, 0),
+    DEFINE_PROP_BOOL("ext-mode", I8257State, ext_mode_on, false),
 };
 
 static void i8257_class_init(ObjectClass *klass, const void *data)
