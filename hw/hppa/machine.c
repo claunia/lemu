@@ -482,7 +482,12 @@ static void machine_HP_common_init_tail(MachineState *machine, PCIBus *pci_bus,
     if (!lasi_dev && machine->enable_graphics && defaults_enabled()) {
         USBBus *usb_bus;
         if (create_diva) {
-            pci_create_simple(pci_bus, -1, "pci-ohci");
+            /*
+             * HP-UX 11.31 (pluto) takes only some OHCIs, such as the NEC
+             * uPD720101 of the rp34x0, not the Apple one.
+             */
+            pci_create_simple(pci_bus, -1,
+                              hpm->sba_pluto ? "nec-usb-ohci" : "pci-ohci");
         }
         usb_bus = USB_BUS(object_resolve_type_unambiguous(TYPE_USB_BUS,
                                                           &error_abort));
