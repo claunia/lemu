@@ -1748,7 +1748,7 @@ endif
 # libaaruformat: the system library if it is new enough (it has aaruf_flush), or
 # the bundled CMake subproject, built as a static library.
 aaruformat = not_found
-if not get_option('aaruformat').auto() or have_block
+if get_option('aaruformat').enabled() or (get_option('aaruformat').auto() and have_block)
   aaruformat = dependency('libaaruformat', required: false)
   if aaruformat.found() and not cc.has_function('aaruf_flush', prefix: '#include <aaruformat.h>',
                                                 dependencies: aaruformat)
