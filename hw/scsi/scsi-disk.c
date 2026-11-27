@@ -2860,7 +2860,7 @@ static int32_t scsi_disk_read_cd_command(SCSIRequest *req, uint8_t *buf)
         .key = ILLEGAL_REQUEST, .asc = 0x64, .ascq = 0x00
     };
     int expected = (buf[1] >> 2) & 7;
-    uint32_t nb_sectors = ldl_be_p(buf + 5) >> 8;
+    uint32_t nb_sectors = ldl_be_p(buf + 5) & 0xffffff;   /* bytes 6-8 */
     uint64_t total_sectors;
 
     rc->toc = scsi_cd_image_toc(s);
@@ -2909,6 +2909,10 @@ static int32_t scsi_disk_read_cd_command(SCSIRequest *req, uint8_t *buf)
 
     if (rc->sector_size == 0) {
         scsi_req_complete(req, GOOD);
+        return 0;
+    }
+    if ((uint64_t)nb_sectors * rc->sector_size > INT32_MAX) {
+        scsi_check_condition(r, SENSE_CODE(INVALID_FIELD));
         return 0;
     }
 
