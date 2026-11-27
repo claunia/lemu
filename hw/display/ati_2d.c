@@ -578,14 +578,20 @@ bool ati_host_data_flush(ATIVGAState *s)
     unsigned bypp, pix_count, row, col, idx;
     uint8_t pix_buf[ATI_HOST_DATA_ACC_BITS * sizeof(uint32_t)];
     uint8_t fg_mask[ATI_HOST_DATA_ACC_BITS];
-    /* the source of the blit that started this, not of later ones */
-    uint32_t src_source = s->host_data.src_source;
+    /*
+     * On the R100 and R200: the source of the blit that started this, not
+     * of later ones, and HOST_BYTEALIGN too
+     */
+    bool r1r2 = ati_is_r100_r200(s);
+    uint32_t src_source = r1r2 ? s->host_data.src_source :
+                          s->regs.dp_mix & DP_SRC_SOURCE;
     uint32_t src_datatype = s->regs.dp_datatype & DP_SRC_DATATYPE;
 
     if (!s->host_data.active) {
         return false;
     }
-    if (src_source != DP_SRC_HOST && src_source != DP_SRC_HOST_BYTEALIGN) {
+    if (src_source != DP_SRC_HOST &&
+        !(r1r2 && src_source == DP_SRC_HOST_BYTEALIGN)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "host_data_blt: unsupported src_source %x\n", src_source);
         return false;
@@ -634,26 +640,32 @@ bool ati_host_data_flush(ATIVGAState *s)
             bswap32s(&bg);
         }
         /*
-         * With HOST_BYTEALIGN every scanline starts on a byte: the bits
+         * On the R100 and R200 the pixels stop at the end of the blit, and
+         * with HOST_BYTEALIGN every scanline starts on a byte: the bits
          * left in the byte that ends a scanline are padding.
          */
         bool byte_align = src_source == DP_SRC_HOST_BYTEALIGN;
         unsigned c = s->host_data.col, r = s->host_data.row;
 
         idx = 0;
-        pix_count = 0;
+        if (r1r2) {
+            pix_count = 0;
+        }
         for (int word = 0; word < 4; word++) {
             for (int byte = 0; byte < 4; byte++) {
                 uint8_t byte_val = s->host_data.acc[word] >> (byte * 8);
                 for (int i = 0; i < 8; i++) {
                     bool is_fg = byte_val & BIT(byte_pix_order ? i : 7 - i);
 
-                    if (r >= ctx.dst.height) {
+                    if (r1r2 && r >= ctx.dst.height) {
                         break;
                     }
                     stn_he_p(&pix_buf[idx], bypp, is_fg ? fg : bg);
                     fg_mask[idx / bypp] = is_fg;
                     idx += bypp;
+                    if (!r1r2) {
+                        continue;
+                    }
                     pix_count++;
                     if (++c >= ctx.dst.width) {
                         c = 0;

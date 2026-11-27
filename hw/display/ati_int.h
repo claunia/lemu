@@ -154,6 +154,7 @@ typedef struct ATICPState {
     uint32_t me_ram[512];
     uint32_t soft_reset;
     int depth;
+    bool in_reg;        /* a packet is writing a register */
     bool running;
     ATICPParser ring;
     ATICPParser ib;
@@ -217,13 +218,28 @@ struct ATIVGAState {
     uint32_t vis_lo, vis_hi;
     int vis_xm;
     uint32_t *mmregs;   /* registers that are only stored */
+    uint32_t pll[0x40]; /* the PLL registers of the R100 and R200 */
 };
 
-/* the R200 family: the Mobility M9 */
+/* the R200 family: the Mobility M9 and the Radeon 9250 */
 static inline bool ati_is_r200(ATIVGAState *s)
 {
     return s->dev_id == PCI_DEVICE_ID_ATI_RADEON_LF ||
            s->dev_id == PCI_DEVICE_ID_ATI_RADEON_9250;
+}
+
+/*
+ * The Radeon 7000 (R100 family) and the R200 family. Only they have the
+ * command processor, the 3D engine, the surfaces and byte swap model, the
+ * memory controller's address map, the frame timer that always runs and
+ * the registers that read back what was written: the AmigaOS and MorphOS
+ * drivers they were made for need them. The Rage 128 and the ES1000 keep
+ * the behaviour they had before, as we do not know that their guests (AIX
+ * on the ES1000) would work with it.
+ */
+static inline bool ati_is_r100_r200(ATIVGAState *s)
+{
+    return s->dev_id == PCI_DEVICE_ID_ATI_RADEON_QY || ati_is_r200(s);
 }
 
 const char *ati_reg_name(int num);

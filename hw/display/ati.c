@@ -70,6 +70,14 @@ static int ati_nonsurf_xm(ATIVGAState *s);
 /* the display reads the visible buffer in the order it is kept in */
 static bool ati_big_endian_fb(ATIVGAState *s)
 {
+    if (!ati_is_r100_r200(s)) {
+        /* the Radeon has the aperture swap controls in SURFACE_CNTL */
+        return s->regs.config_cntl & (APER_0_ENDIAN | APER_1_ENDIAN) ||
+               s->regs.surface_cntl & (NONSURF_AP0_SWP_16BPP |
+                                       NONSURF_AP0_SWP_32BPP |
+                                       NONSURF_AP1_SWP_16BPP |
+                                       NONSURF_AP1_SWP_32BPP);
+    }
     return (s->vis_pin ? s->vis_xm : ati_nonsurf_xm(s)) != 0;
 }
 
@@ -141,11 +149,13 @@ int ati_vram_xm(ATIVGAState *s, uint32_t off)
     uint32_t lo, hi;
     int n, xm;
 
-    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
-        for (n = 0; n < ATI_SURFACES; n++) {
-            if (ati_surface(s, n, &lo, &hi, &xm) && off >= lo && off <= hi) {
-                return xm;
-            }
+    if (!ati_is_r100_r200(s)) {
+        /* all of the memory is kept in the byte order of the display */
+        return s->vga.big_endian_fb ? 3 : 0;
+    }
+    for (n = 0; n < ATI_SURFACES; n++) {
+        if (ati_surface(s, n, &lo, &hi, &xm) && off >= lo && off <= hi) {
+            return xm;
         }
     }
     if (s->vis_pin && off >= s->vis_lo && off <= s->vis_hi) {
@@ -287,14 +297,12 @@ static void ati_nonsurf_reswap(ATIVGAState *s, int from, int to)
     int n, i, k = 0, xm, bpp = 0, cur, target;
     bool vis;
 
-    if (from == to) {
+    if (from == to || !ati_is_r100_r200(s)) {
         return;
     }
-    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
-        for (n = 0; n < ATI_SURFACES; n++) {
-            if (ati_surface(s, n, &lo[k], &hi[k], &xm)) {
-                k++;
-            }
+    for (n = 0; n < ATI_SURFACES; n++) {
+        if (ati_surface(s, n, &lo[k], &hi[k], &xm)) {
+            k++;
         }
     }
     vis = ati_visible(s, &vlo, &vhi, &bpp);
@@ -506,10 +514,16 @@ static void ati_vga_switch_mode(ATIVGAState *s)
  */
 static uint32_t ati_cursor_mode(ATIVGAState *s)
 {
+    uint32_t mode = s->regs.crtc_gen_cntl & CRTC_CUR_MODE_MASK;
+
     if (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF) {
         return 0;
     }
-    return s->regs.crtc_gen_cntl & CRTC_CUR_MODE_MASK;
+    /* the ARGB modes only on the R100 and R200, the others show mono */
+    if (!ati_is_r100_r200(s) && mode != CRTC_CUR_MODE_24BPP_AND) {
+        return 0;
+    }
+    return mode;
 }
 
 static bool ati_cursor_24bpp(ATIVGAState *s)
@@ -820,13 +834,18 @@ static void ati_vga_vblank_irq(void *opaque)
     timer_mod(&s->vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
               NANOSECONDS_PER_SECOND / 60);
     /*
-     * The status bits are set every frame, enabled or not: drivers poll
-     * them to wait for the vertical retrace (AmigaOS waits for VSYNC).
+     * On the R100 and R200 the status bits are set every frame, enabled or
+     * not: drivers poll them to wait for the vertical retrace (AmigaOS
+     * waits for VSYNC). The others only run the timer while the VBLANK
+     * interrupt is on.
      */
-    s->regs.gen_int_status |= CRTC_VBLANK_INT | CRTC_VSYNC_INT;
-    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
-        s->regs.gen_int_status |= RADEON_CRTC2_VBLANK_STAT;
+    if (!ati_is_r100_r200(s)) {
+        s->regs.gen_int_status |= CRTC_VBLANK_INT;
+        ati_vga_update_irq(s);
+        return;
     }
+    s->regs.gen_int_status |= CRTC_VBLANK_INT | CRTC_VSYNC_INT |
+                              RADEON_CRTC2_VBLANK_STAT;
     ati_vga_update_irq(s);
     /*
      * Guests also change the cursor's image in place, without writing a
@@ -1133,10 +1152,26 @@ static uint64_t ati_mm_read(void *opaque, hwaddr addr, unsigned int size)
         qemu_log_mask(LOG_GUEST_ERROR,
                       "Read from write-only register 0x%x\n", (unsigned)addr);
         break;
+    case CLOCK_CNTL_DATA:
+        if (ati_is_r100_r200(s)) {
+            int idx = ati_reg_read_offs(s->mmregs[CLOCK_CNTL_INDEX / 4], 0,
+                                        1) & 0x3f;
+
+            val = s->pll[idx];
+            if (idx == PPLL_REF_DIV || idx == P2PLL_REF_DIV) {
+                /* updates of the dividers are done at once */
+                val &= ~PPLL_ATOMIC_UPDATE_R;
+            }
+            val = ati_reg_read_offs(val, addr & 3, size);
+        }
+        break;
     default:
-        if (!ati_cp_mm_read(s, addr, size, &val) &&
+        /*
+         * On the R100 and R200, registers we do not model read back what
+         * was written; on the others they read 0.
+         */
+        if (ati_is_r100_r200(s) && !ati_cp_mm_read(s, addr, size, &val) &&
             addr < memory_region_size(&s->mm)) {
-            /* registers we do not model read back what was written */
             val = ati_reg_read_offs(s->mmregs[addr / 4], addr & 3, size);
         }
         break;
@@ -1211,23 +1246,34 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     }
     case GEN_INT_CNTL:
         s->regs.gen_int_cntl = data;
-        ati_vga_update_irq(s);
+        if (ati_is_r100_r200(s)) {
+            /* the frame timer always runs, see ati_vga_vblank_irq() */
+            ati_vga_update_irq(s);
+        } else if (data & CRTC_VBLANK_INT) {
+            ati_vga_vblank_irq(s);
+        } else {
+            timer_del(&s->vblank_timer);
+            ati_vga_update_irq(s);
+        }
         break;
     case GEN_INT_STATUS:
-    {
-        bool fire = s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
-                    (data & RADEON_SW_INT_FIRE);
+        if (ati_is_r100_r200(s)) {
+            bool fire = data & RADEON_SW_INT_FIRE;
 
-        data &= (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF ?
-                 0x000f040fUL : 0xfc080effUL & ~RADEON_SW_INT_FIRE);
-        s->regs.gen_int_status &= ~data;
-        if (fire) {
-            /* the CP writes this to raise an interrupt (fences) */
-            s->regs.gen_int_status |= RADEON_SW_INT_TEST;
+            /* SW_INT_TEST is acked by writing it, as the other bits */
+            data &= (0xfc080effUL | RADEON_SW_INT_TEST) & ~RADEON_SW_INT_FIRE;
+            s->regs.gen_int_status &= ~data;
+            if (fire) {
+                /* the CP writes this to raise an interrupt (fences) */
+                s->regs.gen_int_status |= RADEON_SW_INT_TEST;
+            }
+        } else {
+            data &= (s->dev_id == PCI_DEVICE_ID_ATI_RAGE128_PF ?
+                     0x000f040fUL : 0xfc080effUL);
+            s->regs.gen_int_status &= ~data;
         }
         ati_vga_update_irq(s);
         break;
-    }
     case CRTC_GEN_CNTL ... CRTC_GEN_CNTL + 3:
     {
         uint32_t val = s->regs.crtc_gen_cntl;
@@ -1257,7 +1303,8 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
             }
         }
         if ((val ^ s->regs.crtc_gen_cntl) &
-            (CRTC2_EXT_DISP_EN | CRTC2_EN | CRTC_PIX_WIDTH_MASK)) {
+            (CRTC2_EXT_DISP_EN | CRTC2_EN |
+             (ati_is_r100_r200(s) ? CRTC_PIX_WIDTH_MASK : 0))) {
             /* MorphOS changes the depth while the CRTC stays on */
             ati_vga_switch_mode(s);
         }
@@ -1355,9 +1402,17 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         ati_nonsurf_reswap(s, xm, ati_nonsurf_xm(s));
         break;
     }
+    case CLOCK_CNTL_DATA:
+        if (ati_is_r100_r200(s)) {
+            uint32_t idx = s->mmregs[CLOCK_CNTL_INDEX / 4];
+
+            if (idx & PLL_WR_EN) {
+                ati_reg_write_offs(&s->pll[idx & 0x3f], addr & 3, data, size);
+            }
+        }
+        break;
     case 0x2200 ... 0x220f: /* SE_TCL_VECTOR/SCALAR_INDX/DATA_REG */
-        if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF && size == 4 &&
-            !(addr & 3)) {
+        if (ati_is_r100_r200(s) && size == 4 && !(addr & 3)) {
             s->mmregs[addr / 4] = data;
             trace_ati_reg_store(addr, data);
             ati_tcl_write(s, addr, data);
@@ -1378,7 +1433,7 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     case CRTC_H_TOTAL_DISP:
         if (s->regs.crtc_h_total_disp != (data & 0x07ff07ff)) {
             s->regs.crtc_h_total_disp = data & 0x07ff07ff;
-            if (s->mode == EXT_MODE) {
+            if (ati_is_r100_r200(s) && s->mode == EXT_MODE) {
                 ati_vga_switch_mode(s);
             }
         }
@@ -1389,7 +1444,7 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
     case CRTC_V_TOTAL_DISP:
         if (s->regs.crtc_v_total_disp != (data & 0x0fff0fff)) {
             s->regs.crtc_v_total_disp = data & 0x0fff0fff;
-            if (s->mode == EXT_MODE) {
+            if (ati_is_r100_r200(s) && s->mode == EXT_MODE) {
                 ati_vga_switch_mode(s);
             }
         }
@@ -1401,7 +1456,7 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         ati_vis_unpin(s);
         s->regs.crtc_offset = data & 0x87fffff8;
         ati_vga_set_offset(&s->vga, s->regs.crtc_offset & 0x07ffffff);
-        if (s->mode == EXT_MODE) {
+        if (ati_is_r100_r200(s) && s->mode == EXT_MODE) {
             s->vga.big_endian_fb = ati_big_endian_fb(s);
         }
         break;
@@ -1732,13 +1787,14 @@ void ati_mm_write(void *opaque, hwaddr addr, uint64_t data, unsigned int size)
         }
         break;
     case SURFACE0_LOWER_BOUND ... SURFACE0_LOWER_BOUND + ATI_SURFACES * 0x10 - 1:
-        if ((addr & 0xf) && s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF) {
+        if ((addr & 0xf) && ati_is_r100_r200(s)) {
             ati_surface_write(s, addr, data, size);
             break;
         }
         /* fall through */
     default:
-        if (!ati_cp_mm_write(s, addr, data, size) &&
+        /* only the R100 and R200 keep what is written to other registers */
+        if (ati_is_r100_r200(s) && !ati_cp_mm_write(s, addr, data, size) &&
             addr < memory_region_size(&s->mm)) {
             uint32_t alias;
 
@@ -1766,7 +1822,7 @@ static bool ati_mm_aper_swapped(ATIVGAState *s, hwaddr addr)
     if (!(s->regs.config_cntl & APER_REG_ENDIAN)) {
         return false;
     }
-    if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
+    if (ati_is_r100_r200(s) &&
         ((addr >= RADEON_CP_CSQ_APER_PRIMARY &&
           addr < RADEON_CP_CSQ_APER_PRIMARY + 0x200) ||
          (addr >= RADEON_CP_CSQ_APER_INDIRECT &&
@@ -1956,11 +2012,15 @@ static void ati_vga_reset(DeviceState *dev)
 {
     ATIVGAState *s = ATI_VGA(dev);
 
-    /* the frame timer runs all the time, see ati_vga_vblank_irq() */
-    timer_mod(&s->vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
-              NANOSECONDS_PER_SECOND / 60);
-    s->regs.gen_int_cntl = 0;
-    s->regs.gen_int_status = 0;
+    if (ati_is_r100_r200(s)) {
+        /* the frame timer runs all the time, see ati_vga_vblank_irq() */
+        timer_mod(&s->vblank_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                  NANOSECONDS_PER_SECOND / 60);
+        s->regs.gen_int_cntl = 0;
+        s->regs.gen_int_status = 0;
+    } else {
+        timer_del(&s->vblank_timer);
+    }
     ati_vga_update_irq(s);
 
     /* reset vga */
@@ -1976,6 +2036,7 @@ static void ati_vga_reset(DeviceState *dev)
     s->regs.surface_cntl = 0;
     ati_cp_reset(s);
     memset(&s->tcl, 0, sizeof(s->tcl));
+    memset(s->pll, 0, sizeof(s->pll));
     s->vis_pin = false;
 }
 

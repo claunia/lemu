@@ -72,7 +72,7 @@
 
 static bool ati_cp_is_radeon(ATIVGAState *s)
 {
-    return s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF;
+    return ati_is_r100_r200(s);
 }
 
 /* GPU address space */
@@ -241,7 +241,12 @@ static uint32_t ati_cp_swap(uint32_t v, int swap)
 
 static void ati_cp_reg(ATIVGAState *s, uint32_t reg, uint32_t val)
 {
+    bool in_reg = s->cp.in_reg;
+
+    /* saved and restored, so that a reset of the CP here cannot upset it */
+    s->cp.in_reg = true;
     ati_mm_write(s, reg, val, 4);
+    s->cp.in_reg = in_reg;
 }
 
 /* Skips the brush data of a 2D packet; returns false if out of data */
@@ -671,15 +676,23 @@ bool ati_cp_mm_write(ATIVGAState *s, hwaddr addr, uint32_t data,
     if (!ati_cp_is_radeon(s)) {
         return false;
     }
-    if (addr >= RADEON_CP_CSQ_APER_PRIMARY &&
-        addr < RADEON_CP_CSQ_APER_PRIMARY + 0x200) {
+    if ((addr >= RADEON_CP_CSQ_APER_PRIMARY &&
+         addr < RADEON_CP_CSQ_APER_PRIMARY + 0x200) ||
+        (addr >= RADEON_CP_CSQ_APER_INDIRECT &&
+         addr < RADEON_CP_CSQ_APER_INDIRECT + 0x100)) {
+        /*
+         * A packet that writes the CSQ apertures would feed the CP from
+         * inside the CP, as deep as the guest likes: drop it.
+         */
+        if (s->cp.in_reg) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "ati_cp: packet writes the CSQ aperture 0x%x\n",
+                          (unsigned)addr);
+            return true;
+        }
         /* PIO mode: the packets are written straight to the CSQ */
-        ati_cp_feed(s, &s->cp.ring, data);
-        return true;
-    }
-    if (addr >= RADEON_CP_CSQ_APER_INDIRECT &&
-        addr < RADEON_CP_CSQ_APER_INDIRECT + 0x100) {
-        ati_cp_feed(s, &s->cp.ib, data);
+        ati_cp_feed(s, addr < RADEON_CP_CSQ_APER_INDIRECT ?
+                    &s->cp.ring : &s->cp.ib, data);
         return true;
     }
     switch (addr) {
