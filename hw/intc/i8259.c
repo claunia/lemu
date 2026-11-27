@@ -219,9 +219,10 @@ int pic_read_irq(I8259PICState *s)
              * if it still has a request to make, so the master sees a new
              * edge on IRQ2. Without it, a slave in auto-EOI mode with two
              * requests pending keeps INT high and the second is never
-             * delivered.
+             * delivered. Only boards that turn on slave-int-drop (the
+             * BeBox) get it.
              */
-            if (i8259_get_irq(scs) >= 0) {
+            if (scs->slave_int_drop && i8259_get_irq(scs) >= 0) {
                 qemu_irq_lower(scs->int_out[0]);
                 qemu_irq_raise(scs->int_out[0]);
             }
@@ -473,6 +474,8 @@ static const Property i8259_properties[] = {
     DEFINE_PROP_BOOL("edge-irq-withdrawal", I8259CommonState,
                      edge_irq_withdrawal, false),
     DEFINE_PROP_BOOL("ltim-supported", I8259CommonState, ltim_supported, true),
+    DEFINE_PROP_BOOL("slave-int-drop", I8259CommonState, slave_int_drop,
+                     false),
 };
 
 static void i8259_class_init(ObjectClass *klass, const void *data)
