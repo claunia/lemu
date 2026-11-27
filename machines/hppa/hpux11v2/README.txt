@@ -1,7 +1,7 @@
 HP-UX 11i v2 (B.11.23, 64-bit) on QEMU's HP C3700 (one PA-8700 CPU, 2 GB, HP VISUALIZE-EG PCI graphics, SCSI disk, Tulip network)
 
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
-Log in as root, no password, at the CDE login in the QEMU window (1280x1024, about 3 min after the start), on the console in the terminal, or telnet localhost 11223.
+Log in as root, no password, at the CDE login in the QEMU window (1280x1024, about 2 min after the start), on the console in the terminal, or telnet localhost 11223.
 The terminal is the serial console: firmware text, HP-UX boot messages and a console login. Ctrl-A c switches to the QEMU monitor and back. Ctrl-A x stops QEMU at once.
 Installed: HP-UX 11i v2 Foundation Operating Environment (FOE) of May 2005, with CDE. GNU tools: gcc/g++/gfortran 4.0.2, gdb 5.5 (HP WDB) and bzip2 in /opt/TWWfsw/bin; bash 4.3, gmake 3.80, gtar 1.20, less, GNU find, coreutils 9.4, clzip, ncftp and nedit in /usr/local/bin. Both folders are at the end of the PATH, so the HP-UX ls, find and others come first.
 Click in the QEMU window to grab the mouse; Ctrl-Alt-G (Ctrl-Option-G on a Mac) lets it go.
