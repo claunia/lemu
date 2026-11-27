@@ -44,6 +44,7 @@ static const struct {
 } ati_model_aliases[] = {
     { "rage128p", PCI_DEVICE_ID_ATI_RAGE128_PF },
     { "rv100", PCI_DEVICE_ID_ATI_RADEON_QY },
+    { "rv200", PCI_DEVICE_ID_ATI_RADEON_QW },
     { "es1000", PCI_DEVICE_ID_ATI_RADEON_ES1000 },
 };
 
@@ -407,6 +408,14 @@ static uint64_t ati_mm_read(void *opaque, hwaddr addr, unsigned int size)
     case MM_INDEX:
         val = s->regs.mm_index;
         break;
+    case CLOCK_CNTL_INDEX ... CLOCK_CNTL_INDEX + 3:
+        val = ati_reg_read_offs(s->regs.clock_cntl_index,
+                                addr - CLOCK_CNTL_INDEX, size);
+        break;
+    case CLOCK_CNTL_DATA ... CLOCK_CNTL_DATA + 3:
+        val = ati_reg_read_offs(s->regs.pll[s->regs.clock_cntl_index & 0x3f],
+                                addr - CLOCK_CNTL_DATA, size);
+        break;
     case MM_DATA ... MM_DATA + 3:
         /* indexed access to regs or memory */
         if (s->regs.mm_index & BIT(31)) {
@@ -730,6 +739,28 @@ static void ati_mm_write(void *opaque, hwaddr addr,
     case MM_INDEX:
         s->regs.mm_index = data & ~3;
         break;
+    case CLOCK_CNTL_INDEX ... CLOCK_CNTL_INDEX + 3:
+        ati_reg_write_offs(&s->regs.clock_cntl_index,
+                           addr - CLOCK_CNTL_INDEX, data, size);
+        s->regs.clock_cntl_index &= 0x3bf;
+        break;
+    case CLOCK_CNTL_DATA ... CLOCK_CNTL_DATA + 3:
+    {
+        /*
+         * Writes are taken without PLL_WR_EN too: the HP-UX X server
+         * writes the data when the index is already right, and may not
+         * have set PLL_WR_EN.
+         */
+        int idx = s->regs.clock_cntl_index & 0x3f;
+
+        ati_reg_write_offs(&s->regs.pll[idx], addr - CLOCK_CNTL_DATA,
+                           data, size);
+        if (idx == PPLL_REF_DIV || idx == P2PLL_REF_DIV) {
+            /* the PLL takes the new dividers at once */
+            s->regs.pll[idx] &= ~PPLL_ATOMIC_UPDATE_R;
+        }
+        break;
+    }
     case MM_DATA ... MM_DATA + 3:
         /* indexed access to regs or memory */
         if (s->regs.mm_index & BIT(31)) {
@@ -1323,9 +1354,10 @@ static void ati_vga_realize(PCIDevice *dev, Error **errp)
     }
     if (s->dev_id != PCI_DEVICE_ID_ATI_RAGE128_PF &&
         s->dev_id != PCI_DEVICE_ID_ATI_RADEON_QY &&
+        s->dev_id != PCI_DEVICE_ID_ATI_RADEON_QW &&
         s->dev_id != PCI_DEVICE_ID_ATI_RADEON_ES1000) {
         error_setg(errp, "Unknown ATI VGA device id, "
-                   "only 0x5046, 0x5159 and 0x515e are supported");
+                   "only 0x5046, 0x5159, 0x5157 and 0x515e are supported");
         return;
     }
     pci_set_word(dev->config + PCI_DEVICE_ID, s->dev_id);
@@ -1418,6 +1450,17 @@ static void ati_vga_reset(DeviceState *dev)
     s->regs.rbbm_guicntl = 0;
     s->regs.config_cntl = 0;
     s->regs.surface_cntl = 0;
+    /*
+     * PLL registers (CLOCK_CNTL_INDEX/DATA): only stored. The dividers are
+     * a 27 MHz reference / 12, as on many Radeons, so drivers that work
+     * out the clocks from them don't divide by zero.
+     */
+    s->regs.clock_cntl_index = 0;
+    memset(s->regs.pll, 0, sizeof(s->regs.pll));
+    s->regs.pll[PPLL_REF_DIV] = 12;
+    s->regs.pll[PPLL_DIV_3] = 0x00030060;
+    s->regs.pll[P2PLL_REF_DIV] = 12;
+    s->regs.pll[X_MPLL_REF_FB_DIV] = 0x0058580c;
 }
 
 static void ati_vga_exit(PCIDevice *dev)
