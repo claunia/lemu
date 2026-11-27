@@ -2,7 +2,7 @@
 
 **TL;DR** `-M C3700` runs 64-bit HP-UX 11i v1 (B.11.11) and 11i v2 (B.11.23) on one
 PA-8700 CPU. Both install from their CDs, boot from disk to the console login, and run
-Java and CDE on an emulated HP VISUALIZE-EG PCI card. Eight QEMU changes and seven firmware
+Java and CDE on an emulated HP VISUALIZE-EG PCI card. Nine QEMU changes and eight firmware
 changes make this work. There is no kit yet.
 
 ## Run
@@ -12,7 +12,8 @@ changes make this work. There is no kit yet.
 the first serial port, in the terminal (`-serial mon:stdio`). Ctrl-A c goes to the QEMU
 monitor and back, Ctrl-A x quits QEMU. Halt HP-UX first with `reboot -h`. A window shows the
 graphics card (`-device artist-pci`, see Graphics). `GFX=0 ./run.sh 11.11` runs without the
-card and the window (`-nographic`).
+card and the window (`-nographic`). `CONSOLE=graphics ./run.sh 11.11` makes the card the
+system console.
 
 The network is QEMU's user network. The install leaves the LAN card without an address,
 and `/etc/hosts` gives the host name 127.0.0.1. Then DCE `rpcd` stops at boot ("Start
@@ -32,6 +33,15 @@ PCI card, with an STI ROM (`pc-bios/hppa-sti-artist.rom`). HP-UX claims it as "P
 (103c1005)" (driver `graph3`), runs the ITE on it, and X and CDE use it. The keyboard and
 mouse are the C3700's USB ones. The firmware and the system console stay on the serial
 port.
+
+The system console stays on the serial port, unless the firmware gets
+`-fw_cfg opt/console,string=graphics` (`CONSOLE=graphics` in run.sh). Then the firmware
+draws its text on the card (its own STI code, the regions in BAR 0) and names the card as
+the console in PAGE0. HP-UX says "System Console is on the ITE": the rc messages and the
+console login are on the screen, with the USB keyboard. The firmware cannot read the USB
+keyboard, so its keyboard stays on the serial port, and the serial port gets a copy of the
+firmware text. After the kernel starts, the serial port has no login. Seen once on 11.23: the
+first X server start died, and dtlogin started it again.
 
 A disk installed without the card needs three changes. Make them once, with the card:
 
@@ -89,11 +99,14 @@ A disk installed without the card needs three changes. Make them once, with the 
   buffer, as on the B160L. The expansion ROM holds the STI ROM. The ROM also shows at the
   start of BAR 0: the STI region list puts region 0 (the ROM) there, and HP-UX finds the
   card's display by that address.
+- **Power button in snapshots** (`target/hppa/machine.c`). The firmware's soft power word
+  (`env.power_btn`) was not saved. loadvm resets the machine first, and 0 there means
+  "button pressed", so HP-UX powered off after each loadvm.
 - Debug aid: the trace event `hppa_tlb_ar_fault` shows access-rights faults.
 
 ## Firmware
 
-LEMU's SeaBIOS-hppa 27 with four changes, from github.com/tenox7/seabios-hppa branch
+LEMU's SeaBIOS-hppa 27 with eight changes, from github.com/tenox7/seabios-hppa branch
 `hpux11` (offered upstream as hdeller/seabios-hppa pull request 9):
 
 1. The console path names SuperIO serial port 1, not the SuperIO. Else HP-UX finds no
@@ -112,12 +125,14 @@ LEMU's SeaBIOS-hppa 27 with four changes, from github.com/tenox7/seabios-hppa br
    ROM header, the region map and the STI ROM with 32- and 64-bit code. It keeps the
    Artist's graphics ID: HP-UX has its own routines for the real EG's ID, and they need
    STI regions that the device does not have.
+8. `opt/console=graphics` also works with the PCI card on the Astro machines: the STI
+   console on the card, as above.
 
 ## Not working yet
 
 - HP-UX 11i v3 (B.11.31): "ccio/sba driver not found". It needs PAT firmware.
 - A400: PAT is not complete (`pat_init_cell` and others).
-- The firmware's boot menu and messages are on the serial port only. Its STI console
-  knows only the B160L's Artist, not the PCI card.
+- With the graphics console, the firmware's boot menu reads only the serial port (no USB
+  keyboard in the 64-bit firmware).
 - Crash dumps through IODC: ENTRY_IO on the Elroy returns BAD_OPTION.
 - Only one CPU is tested.
