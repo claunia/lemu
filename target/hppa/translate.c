@@ -1890,7 +1890,7 @@ static bool do_fop_wed(DisasContext *ctx, unsigned rt, unsigned ra,
     TCGv_i64 src;
 
     nullify_over(ctx);
-    src = load_frd(ra);
+    src = load_frd0(ra);
     dst = tcg_temp_new_i32();
 
     func(dst, tcg_env, src);
