@@ -75,6 +75,12 @@ struct CSState {
     qemu_irq pic;
     uint32_t regs[CS_REGS];
     uint8_t dregs[CS_DREGS];
+    /*
+     * The base count holds the number of samples less one, and one-shot
+     * DMA stops at terminal count, as the datasheet has it. Off by default;
+     * the BeBox turns it on.
+     */
+    bool exact_dma;
     uint32_t irq;
     uint32_t dma;
     uint32_t port;
@@ -575,17 +581,18 @@ static int cs_dma_read (void *opaque, int nchan, int dma_pos, int dma_len)
 {
     CSState *s = opaque;
     IsaDmaClass *k = ISADMA_GET_CLASS(s->isa_dma);
-    bool autoinit = k->has_autoinitialization(s->isa_dma, nchan);
+    bool autoinit = !s->exact_dma ||
+                    k->has_autoinitialization(s->isa_dma, nchan);
     int copy, written;
     int till = -1;
 
     copy = s->voice ? (s->audio_free >> (s->tab != NULL)) : dma_len;
 
     if (s->dregs[Pin_Control] & IEN) {
-        /* the base count holds the number of samples less one */
+        /* with exact-dma, the base count holds the samples less one */
         till = ((s->dregs[Playback_Lower_Base_Count]
-                 | (s->dregs[Playback_Upper_Base_Count] << 8)) + 1)
-               << s->shift;
+                 | (s->dregs[Playback_Upper_Base_Count] << 8)) +
+                s->exact_dma) << s->shift;
         till -= s->transferred;
         copy = MIN (till, copy);
     }
@@ -714,6 +721,7 @@ static const Property cs4231a_properties[] = {
     DEFINE_PROP_UINT32 ("iobase",  CSState, port, 0x534),
     DEFINE_PROP_UINT32 ("irq",     CSState, irq,  9),
     DEFINE_PROP_UINT32 ("dma",     CSState, dma,  3),
+    DEFINE_PROP_BOOL ("exact-dma", CSState, exact_dma, false),
 };
 
 static void cs4231a_class_initfn(ObjectClass *klass, const void *data)
