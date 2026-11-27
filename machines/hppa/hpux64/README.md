@@ -166,11 +166,18 @@ The 11.31 PA X server has no Artist driver. It has the XFree86 4.2 radeon driver
 gvid driver takes a Radeon 7500. Add the card (the console stays on the serial port):
 
 ```
-  -device ati-vga,model=rv200,x-linear-aper-size=0x4000000 -serial mon:stdio
+  -device ati-vga,model=rv200,x-linear-aper-size=0x4000000,guest_hwcursor=true \
+  -serial mon:stdio
 ```
 
 - `model=rv200` is 1002:5157, emulated as the RV100. gvid maps 64 MB from every memory BAR
   of this card, so the aperture is 64 MB too.
+- `guest_hwcursor=true`: QEMU draws the mouse pointer into the screen. Without it, SDL and
+  cocoa show a host cursor and move the host pointer to where X put its pointer. X doubles
+  fast moves, so the pointer jumps. The AIX ES1000 VMs use it for the same reason.
+- X uses a 32 bpp big endian frame buffer (SURFACE_CNTL swaps), sends images through
+  HOST_DATA with DP_DATATYPE HOST_BIG_ENDIAN_EN, and has a mono hardware cursor that it
+  writes through the swapping aperture.
 - The Elroys are Mercury LBAs (hv 0x783) at SBA + 0x20000 + rope * 0x2000, as on an
   rp34x0. gvid looks for them there.
 - The firmware puts the small BARs right above the big ones. The kernel refuses gvid's
