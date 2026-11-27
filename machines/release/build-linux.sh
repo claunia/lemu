@@ -22,7 +22,7 @@ dnf config-manager --set-enabled crb
 dnf -y -q install gcc-toolset-13-gcc gcc-toolset-13-binutils make ninja-build \
     python3.12 glib2-devel pixman-devel SDL2-devel libslirp-devel zlib-devel \
     pulseaudio-libs-devel alsa-lib-devel \
-    diffutils findutils patchelf bzip2 tar
+    diffutils findutils patchelf bzip2 tar cmake
 . /opt/rh/gcc-toolset-13/enable
 mkdir -p /b/build
 tar -C /src --exclude=./.git --exclude='./build*' --exclude=.env -cf - . | tar -C /b -xf -
@@ -34,6 +34,7 @@ cd /b/build
     --enable-pixman --enable-slirp --enable-pa --enable-alsa --enable-malloc-trim --enable-membarrier \
     --enable-fdt=internal --enable-vnc --enable-rdp --enable-vvfat --enable-qcow1 --enable-vdi --enable-vmdk \
     --enable-vpc --enable-vhdx --enable-qed --enable-bochs --enable-cloop --enable-dmg --enable-parallels \
+    --enable-aaruformat \
     --enable-stack-protector --disable-docs > $out-configure.log
 ninja $BINS > $out-ninja.log
 
