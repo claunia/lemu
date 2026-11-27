@@ -128,10 +128,40 @@ LEMU's SeaBIOS-hppa 27 with eight changes, from github.com/tenox7/seabios-hppa b
 8. `opt/console=graphics` also works with the PCI card on the Astro machines: the STI
    console on the card, as above.
 
+## HP-UX 11i v3 (B.11.31) on the A400
+
+11.31 on PA-RISC supports only zx1, REO and PAT machines. `-M A400,pluto=on` shows the
+A400's Astro as a Pluto (zx1) SBA. The MCOE June 2007 DVDs (2 discs) install and boot to
+login:
+
+```
+qemu-system-hppa -M A400,pluto=on -m 2048 -smp 1 -nographic \
+  -drive if=scsi,bus=0,index=6,file=hpux1131.qcow2,format=qcow2 \
+  -drive if=scsi,bus=0,index=2,media=cdrom,file=hp-ux-11.31-mcoe-06.2007-dvd1.iso \
+  -boot d -nic user,model=tulip
+```
+
+At about fileset 1125 of 1197 Ignite asks for media 2: in the monitor,
+`change scsi0-cd2 hp-ux-11.31-mcoe-06.2007-dvd2.iso raw read-only`, then answer 1.
+
+With `pluto=on`:
+- The firmware gives the SBA the Pluto IODC (hv 0x880). The IOC registers are also at
+  0x2000, as on a Pluto. IBASE and IMASK start as a 1 GB IOVA window at 1 GB, and the I/O
+  PDIR index is the page inside that window.
+- The SCSI card is a 53C875 (`lsi53c875`): the 11.31 c8xx driver takes the 53C875, 53C896
+  and 53C1010-66, but not the 53C895 or 53C895A.
+- The Diva serial card has the UART interrupt status byte at BAR 0 + 0x1b. 11.31 asio0_intr
+  reads it.
+- PAT firmware (branch `hpux1131`): 32-bit LMMIO ranges in the I/O view, -7 (PDC_NE_CELL_MOD)
+  at the end of the module list, PDC_PAT_IO 0, the hint table and the hard-fail calls, and
+  PDC_IODC_READ of a PCI function by its config address (else lvlnboot stops with "IODC
+  max address", as on 11.23 before fix 2).
+
 ## Not working yet
 
-- HP-UX 11i v3 (B.11.31): "ccio/sba driver not found". It needs PAT firmware.
-- A400: PAT is not complete (`pat_init_cell` and others).
+- HP-UX 11.31: evmd aborts at boot (S020evm FAILED). PDC_PAT_IO 13 and PDC_PAT_COMPLEX 0
+  and 13 are not there.
+- A400 without `pluto`: PAT is not complete (`pat_init_cell` and others).
 - With the graphics console, the firmware's boot menu reads only the serial port (no USB
   keyboard in the 64-bit firmware).
 - Crash dumps through IODC: ENTRY_IO on the Elroy returns BAD_OPTION.
