@@ -313,6 +313,31 @@ static void test_write_to_cdrom(void *obj, void *data,
     qvirtio_scsi_pci_free(vs);
 }
 
+/* READ CD of a drive with no disc: NOT READY, MEDIUM NOT PRESENT */
+static void test_read_cd_no_medium(void *obj, void *data,
+                                   QGuestAllocator *t_alloc)
+{
+    QVirtioSCSI *scsi = obj;
+    QVirtioSCSIQueues *vs;
+    uint8_t buf[2352];
+    const uint8_t read_cd_cdb[VIRTIO_SCSI_CDB_SIZE] = {
+        /* READ CD of LBA 0, 1 sector, user data */
+        0xbe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x10
+    };
+    struct virtio_scsi_cmd_resp resp;
+
+    alloc = t_alloc;
+    vs = qvirtio_scsi_init(scsi->vdev);
+
+    virtio_scsi_do_command(vs, read_cd_cdb, buf, sizeof(buf), NULL, 0, &resp);
+    g_assert_cmphex(resp.response, ==, 0);
+    g_assert_cmphex(resp.status, ==, CHECK_CONDITION);
+    g_assert_cmphex(resp.sense[2], ==, NOT_READY);
+    g_assert_cmphex(resp.sense[12], ==, 0x3a); /* MEDIUM NOT PRESENT */
+
+    qvirtio_scsi_pci_free(vs);
+}
+
 #ifdef CONFIG_AARUFORMAT
 /*
  * The mixed CD of the aaruformat-cd iotest: track 1 is mode 1 data (LBA
@@ -517,6 +542,12 @@ static void *virtio_scsi_setup_cd(GString *cmd_line, void *arg)
     return arg;
 }
 
+static void *virtio_scsi_setup_cd_empty(GString *cmd_line, void *arg)
+{
+    g_string_append(cmd_line, " -device scsi-cd,lun=0,scsi-id=1");
+    return arg;
+}
+
 static void *virtio_scsi_setup_iothread(GString *cmd_line, void *arg)
 {
     g_string_append(cmd_line,
@@ -547,6 +578,10 @@ static void register_virtio_scsi_test(void)
 
     opts.before = virtio_scsi_setup_cd;
     qos_add_test("write-to-cdrom", "virtio-scsi", test_write_to_cdrom, &opts);
+
+    opts.before = virtio_scsi_setup_cd_empty;
+    qos_add_test("read-cd-no-medium", "virtio-scsi", test_read_cd_no_medium,
+                 &opts);
 
 #ifdef CONFIG_AARUFORMAT
     opts.before = virtio_scsi_setup_aaruformat_cd;

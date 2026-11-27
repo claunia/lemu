@@ -2864,6 +2864,11 @@ static int32_t scsi_disk_read_cd_command(SCSIRequest *req, uint8_t *buf)
     uint32_t nb_sectors = ldl_be_p(buf + 5) & 0xffffff;   /* bytes 6-8 */
     uint64_t total_sectors;
 
+    if (!blk_is_available(s->qdev.conf.blk)) {
+        scsi_check_condition(r, SENSE_CODE(NO_MEDIUM));
+        return 0;
+    }
+
     rc->toc = scsi_cd_image_toc(s);
     if (!rc->toc) {
         scsi_check_condition(r, SENSE_CODE(INVALID_OPCODE));
