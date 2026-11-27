@@ -3558,13 +3558,19 @@
 #
 # @deduplicate: store identical sectors once (default: on)
 #
+# @checkpoint-interval: seconds after a write before the image is
+#     checkpointed when the guest does not flush, so it opens with
+#     that data if QEMU stops; 0 checkpoints only on guest flushes
+#     (default: 5)
+#
 # Since: 11.2
 ##
 { 'struct': 'BlockdevOptionsAaruFormat',
   'base': 'BlockdevOptionsGenericFormat',
   'data': { '*compress': 'bool',
             '*compression-type': 'AaruFormatCompression',
-            '*deduplicate': 'bool' },
+            '*deduplicate': 'bool',
+            '*checkpoint-interval': 'uint32' },
   'if': 'CONFIG_AARUFORMAT' }
 
 ##

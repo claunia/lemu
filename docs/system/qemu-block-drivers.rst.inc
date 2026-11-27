@@ -381,7 +381,9 @@ This section describes each format and the options that are supported for it.
   writes over data already in the file: every write is added at the end,
   so the file grows as the guest rewrites sectors. ``qemu-img convert``
   makes a compact copy. A guest flush writes a checkpoint: if QEMU or the
-  host stops, the image opens as it was at the last flush.
+  host stops, the image opens as it was at the last checkpoint. Many old
+  guests (DOS, Windows 9x) never flush, so a checkpoint is also written
+  a few seconds after the guest writes (``checkpoint-interval``).
 
   CD and DVD images (optical discs) are read-only. Guests read the 2048
   bytes of user data of each sector; with ``ide-cd`` and ``scsi-cd``, CD
@@ -425,7 +427,9 @@ This section describes each format and the options that are supported for it.
 
   Runtime options (``-drive``/``-blockdev``): ``compress``,
   ``compression-type`` and ``deduplicate``, for the data written while
-  the image is open.
+  the image is open, and ``checkpoint-interval``, the seconds after a
+  write before a checkpoint is written when the guest does not flush
+  (default: 5; 0 writes checkpoints only when the guest flushes).
 
 Read-only formats
 ~~~~~~~~~~~~~~~~~

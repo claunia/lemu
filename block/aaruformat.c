@@ -55,8 +55,13 @@
 #define AARUFORMAT_RT_COMPRESS         "compress"
 #define AARUFORMAT_RT_COMPRESSION_TYPE "compression-type"
 #define AARUFORMAT_RT_DEDUPLICATE      "deduplicate"
+#define AARUFORMAT_RT_CHECKPOINT       "checkpoint-interval"
+
+/* Seconds after a write without a flush before a checkpoint is written */
+#define AARUFORMAT_DEFAULT_CHECKPOINT  5
 
 typedef struct BDRVAaruFormatState {
+    BlockDriverState *bs;
     CoMutex lock;
     AaruLib *ctx;           /* libaaruformat image */
     char *path;             /* local file the library opened */
@@ -75,6 +80,14 @@ typedef struct BDRVAaruFormatState {
     uint8_t *scratch;       /* AARUFORMAT_MAX_SECTOR bytes, used under lock */
     BlockCdToc *toc;        /* optical discs only */
     Error *migration_blocker;
+    /*
+     * Many old guests never flush, and nothing written since the last
+     * checkpoint can be found again if QEMU stops: write one on our own
+     * some seconds after a write.
+     */
+    QEMUTimer *checkpoint_timer;
+    int64_t checkpoint_ns;  /* 0: only when the guest flushes */
+    bool dirty;             /* written since the last checkpoint */
 } BDRVAaruFormatState;
 
 /*
@@ -334,9 +347,101 @@ static QemuOptsList aaruformat_runtime_opts = {
             .type = QEMU_OPT_BOOL,
             .help = "Store identical sectors once",
         },
+        {
+            .name = AARUFORMAT_RT_CHECKPOINT,
+            .type = QEMU_OPT_NUMBER,
+            .help = "Seconds after a write before the image is checkpointed "
+                    "if the guest does not flush (0: never)",
+        },
         { /* end of list */ }
     },
 };
+
+/* Checkpoints */
+
+static int coroutine_fn aaruformat_checkpoint(BDRVAaruFormatState *s)
+{
+    AaruFormatIO io = { .s = s };
+    int ret;
+
+    if (!s->writable || !s->dirty) {
+        return 0;
+    }
+
+    /* writes coming in while it runs make it dirty again */
+    s->dirty = false;
+    ret = aaruformat_run(aaruformat_flush_worker, &io);
+    if (ret < 0) {
+        s->dirty = true;
+    }
+    return ret;
+}
+
+static void coroutine_fn aaruformat_checkpoint_entry(void *opaque)
+{
+    BDRVAaruFormatState *s = opaque;
+
+    aaruformat_checkpoint(s);
+    bdrv_dec_in_flight(s->bs);
+}
+
+static void aaruformat_checkpoint_cb(void *opaque)
+{
+    BDRVAaruFormatState *s = opaque;
+    Coroutine *co = qemu_coroutine_create(aaruformat_checkpoint_entry, s);
+
+    bdrv_inc_in_flight(s->bs);
+    aio_co_enter(bdrv_get_aio_context(s->bs), co);
+}
+
+/* After a write: a checkpoint some seconds later, unless one is due */
+static void aaruformat_written(BDRVAaruFormatState *s)
+{
+    s->dirty = true;
+    if (s->checkpoint_timer && s->checkpoint_ns &&
+        !timer_pending(s->checkpoint_timer)) {
+        timer_mod(s->checkpoint_timer,
+                  qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + s->checkpoint_ns);
+    }
+}
+
+static void aaruformat_detach_aio_context(BlockDriverState *bs)
+{
+    BDRVAaruFormatState *s = bs->opaque;
+
+    if (s->checkpoint_timer) {
+        timer_free(s->checkpoint_timer);
+        s->checkpoint_timer = NULL;
+    }
+}
+
+static void aaruformat_attach_aio_context(BlockDriverState *bs,
+                                          AioContext *new_context)
+{
+    BDRVAaruFormatState *s = bs->opaque;
+
+    /* the realtime clock, so a paused VM is checkpointed too */
+    s->checkpoint_timer = aio_timer_new(new_context, QEMU_CLOCK_REALTIME,
+                                        SCALE_NS, aaruformat_checkpoint_cb, s);
+    if (s->dirty && s->checkpoint_ns) {
+        timer_mod(s->checkpoint_timer,
+                  qemu_clock_get_ns(QEMU_CLOCK_REALTIME) + s->checkpoint_ns);
+    }
+}
+
+/* A drain waits for nothing: the checkpoint due is written now */
+static void aaruformat_drain_begin(BlockDriverState *bs)
+{
+    BDRVAaruFormatState *s = bs->opaque;
+
+    if (s->checkpoint_timer && timer_pending(s->checkpoint_timer)) {
+        Coroutine *co = qemu_coroutine_create(aaruformat_checkpoint_entry, s);
+
+        timer_del(s->checkpoint_timer);
+        bdrv_inc_in_flight(bs);
+        aio_co_enter(bdrv_get_aio_context(bs), co);
+    }
+}
 
 static bool aaruformat_parse_compression(const char *str, bool *zstd,
                                          Error **errp)
@@ -545,6 +650,10 @@ static int aaruformat_open(BlockDriverState *bs, QDict *options, int flags,
         ret = -EINVAL;
         goto fail;
     }
+    s->bs = bs;
+    s->checkpoint_ns = qemu_opt_get_number(opts, AARUFORMAT_RT_CHECKPOINT,
+                                           AARUFORMAT_DEFAULT_CHECKPOINT) *
+                       NANOSECONDS_PER_SECOND;
     s->compress = qemu_opt_get_bool(opts, AARUFORMAT_RT_COMPRESS, s->compress);
     s->deduplicate = qemu_opt_get_bool(opts, AARUFORMAT_RT_DEDUPLICATE,
                                        s->deduplicate);
@@ -593,6 +702,8 @@ static int aaruformat_open(BlockDriverState *bs, QDict *options, int flags,
         goto fail;
     }
 
+    aaruformat_attach_aio_context(bs, bdrv_get_aio_context(bs));
+
     qemu_opts_del(opts);
     return 0;
 
@@ -614,6 +725,8 @@ fail:
 static void aaruformat_close(BlockDriverState *bs)
 {
     BDRVAaruFormatState *s = bs->opaque;
+
+    aaruformat_detach_aio_context(bs);
 
     if (s->ctx) {
         aaru_lib_close(s->ctx);
@@ -761,6 +874,7 @@ aaruformat_co_pwritev(BlockDriverState *bs, int64_t offset, int64_t bytes,
 
     qemu_iovec_to_buf(qiov, 0, io.buf, bytes);
     ret = aaruformat_run(aaruformat_write_worker, &io);
+    aaruformat_written(s);
 
     qemu_vfree(io.buf);
     return ret;
@@ -805,13 +919,11 @@ static int coroutine_fn GRAPH_RDLOCK
 aaruformat_co_flush_to_os(BlockDriverState *bs)
 {
     BDRVAaruFormatState *s = bs->opaque;
-    AaruFormatIO io = { .s = s };
 
-    if (!s->writable) {
-        return 0;
+    if (s->checkpoint_timer) {
+        timer_del(s->checkpoint_timer);
     }
-
-    return aaruformat_run(aaruformat_flush_worker, &io);
+    return aaruformat_checkpoint(s);
 }
 
 static int coroutine_fn GRAPH_RDLOCK
@@ -1098,6 +1210,9 @@ static BlockDriver bdrv_aaruformat = {
     .bdrv_reopen_commit             = aaruformat_reopen_commit,
     .bdrv_reopen_abort              = aaruformat_reopen_abort,
     .bdrv_has_zero_init             = bdrv_has_zero_init_1,
+    .bdrv_attach_aio_context        = aaruformat_attach_aio_context,
+    .bdrv_detach_aio_context        = aaruformat_detach_aio_context,
+    .bdrv_drain_begin               = aaruformat_drain_begin,
 
     .bdrv_co_preadv                 = aaruformat_co_preadv,
     .bdrv_co_pwritev                = aaruformat_co_pwritev,

@@ -42,6 +42,13 @@ read 1048576/1048576 bytes at offset 4194304
 1 MiB, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
 read 1048576/1048576 bytes at offset 15728640
 1 MiB, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
+== stop without a flush, after a checkpoint of our own ==
+wrote 1048576/1048576 bytes at offset 6291456
+1 MiB, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
+read 1048576/1048576 bytes at offset 6291456
+1 MiB, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
+read 1048576/1048576 bytes at offset 2097152
+1 MiB, X ops; XX:XX:XX.X (XXX YYY/sec and XXX ops/sec)
 == convert ==
 -- 
 Images are identical.

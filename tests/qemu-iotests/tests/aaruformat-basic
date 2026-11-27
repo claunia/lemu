@@ -71,6 +71,13 @@ io -c "write -P 0x44 2M 1M" -c "flush" -c "write -P 0x55 4M 1M" \
    -c "sigraise 9" | grep -v Killed
 io -c "read -P 0x44 2M 1M" -c "read -P 0 4M 1M" -c "read -P 0x33 15M 1M"
 
+echo "== stop without a flush, after a checkpoint of our own =="
+$QEMU_IO_PROG --image-opts \
+    -c "write -P 0x66 6M 1M" -c "sleep 2500" -c "sigraise 9" \
+    "driver=$IMGFMT,checkpoint-interval=1,file.filename=$TEST_IMG" 2>&1 | \
+    _filter_qemu_io | grep -v Killed
+io -c "read -P 0x66 6M 1M" -c "read -P 0x44 2M 1M"
+
 echo "== convert =="
 $QEMU_IMG convert -f $IMGFMT -O raw "$TEST_IMG" "$TEST_IMG.raw"
 for opts in "" "-o compress=on,compression_type=zstd" "-c" \
