@@ -21,8 +21,8 @@
 4. PE checksum fixed.
 
 Why interlaced: QEMU's Cirrus shows height from CR12/CR07 and doubles it when CR1A bit 0 is set.
-It does not model the scan-line divide (CR17) or 8-bit pixel multiplexing that a progressive
-1280x1024 needs. Interlaced is what the real Cirrus BIOS uses too. In QEMU it is just a label.
+When this was made it did not model the scan-line divide (CR17) or 8-bit pixel multiplexing that
+a progressive 1280x1024 needs (LEMU has both since 2026-11-24). Interlaced is what the real Cirrus BIOS uses too. In QEMU it is just a label.
 
 ## Use
 

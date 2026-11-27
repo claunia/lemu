@@ -9,6 +9,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qapi/error.h"
 #include "hw/core/irq.h"
 #include "hw/pci/pci_device.h"
 #include "hw/core/qdev-properties.h"
@@ -28,6 +29,7 @@ struct TULIPState {
     NICState *nic;
     eeprom_t *eeprom;
     bool is_21041;
+    char *srom_name;
     uint32_t csr[16];
 
     /* state for MII */
@@ -986,10 +988,36 @@ static const uint8_t eeprom_21041[128] = {
     [35] = 0x01,                /* BNC */
 };
 
+/*
+ * DEC's SROM format puts the board name right after the controller
+ * entries: at byte 26 + 3 * 1 with one controller. Drivers such as DG/UX's
+ * dpen and Linux's de4x5 tell DEC boards apart by it. The default image
+ * has its info leaf there, so it moves past the name.
+ */
+#define TULIP_SROM_NAME         29
+#define TULIP_SROM_NAME_LEN     8
+#define TULIP_SROM_LEAF         0x1e
+#define TULIP_SROM_LEAF_LEN     17
+#define TULIP_SROM_NAMED_LEAF   0x30
+
+static void tulip_set_srom_name(TULIPState *s, uint8_t *srom)
+{
+    memmove(srom + TULIP_SROM_NAMED_LEAF, srom + TULIP_SROM_LEAF,
+            TULIP_SROM_LEAF_LEN);
+    memset(srom + TULIP_SROM_NAME, 0,
+           TULIP_SROM_NAMED_LEAF - TULIP_SROM_NAME);
+    memcpy(srom + TULIP_SROM_NAME, s->srom_name, strlen(s->srom_name));
+    srom[27] = TULIP_SROM_NAMED_LEAF;
+    srom[28] = 0;
+}
+
 static void tulip_fill_eeprom(TULIPState *s)
 {
     uint16_t *eeprom = eeprom93xx_data(s->eeprom);
     memcpy(eeprom, s->is_21041 ? eeprom_21041 : eeprom_default, 128);
+    if (s->srom_name) {
+        tulip_set_srom_name(s, (uint8_t *)eeprom);
+    }
 
     /* patch in our mac address */
     eeprom[10] = cpu_to_le16(s->c.macaddr.a[0] | (s->c.macaddr.a[1] << 8));
@@ -1005,6 +1033,12 @@ static void pci_tulip_realize(PCIDevice *pci_dev, Error **errp)
 {
     TULIPState *s = DO_UPCAST(TULIPState, dev, pci_dev);
     uint8_t *pci_conf;
+
+    if (s->srom_name && strlen(s->srom_name) > TULIP_SROM_NAME_LEN) {
+        error_setg(errp, "srom-name has more than %d characters",
+                   TULIP_SROM_NAME_LEN);
+        return;
+    }
 
     pci_conf = s->dev.config;
     pci_conf[PCI_INTERRUPT_PIN] = 1; /* interrupt pin A */
@@ -1055,6 +1089,8 @@ static void tulip_instance_init(Object *obj)
 
 static const Property tulip_properties[] = {
     DEFINE_NIC_PROPERTIES(TULIPState, c),
+    /* A DEC board name for the SROM, such as DE500-BA */
+    DEFINE_PROP_STRING("srom-name", TULIPState, srom_name),
 };
 
 static void tulip_class_init(ObjectClass *klass, const void *data)

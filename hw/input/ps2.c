@@ -1030,6 +1030,8 @@ void ps2_write_mouse(PS2MouseState *s, int val)
             s->mouse_resolution = 2;
             s->mouse_status = 0;
             s->mouse_type = 0;
+            /* Reset ends wrap mode: DG/UX checks for a mouse with it */
+            s->mouse_wrap = 0;
             ps2_reset_queue(ps2);
             ps2_queue_3(ps2,
                 AUX_ACK,

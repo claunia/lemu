@@ -65,6 +65,7 @@ struct I8259PICState {
     ISABus *isabus;
     IRQState i8259_primary_out_irq;
     I8259State i8259[2];
+    uint16_t edge_irqs;
 
     int irq_level[ISA_NUM_IRQS];
     uint64_t irq_count[ISA_NUM_IRQS];
@@ -543,7 +544,11 @@ static void i8259_pic_realize(DeviceState *dev, Error **errp)
     pri_dev = DEVICE(&s->i8259[0]);
     qdev_prop_set_uint32(pri_dev, "iobase", 0x20);
     qdev_prop_set_uint32(pri_dev, "elcr_addr", 0x4d0);
-    qdev_prop_set_uint8(pri_dev, "elcr_mask", 0xf8);
+    /*
+     * edge-irqs: inputs that stay edge triggered whatever the firmware
+     * writes to the ELCR, for ISA cards on IRQs that SeaBIOS gives to PCI.
+     */
+    qdev_prop_set_uint8(pri_dev, "elcr_mask", 0xf8 & ~(s->edge_irqs & 0xff));
     qdev_prop_set_bit(pri_dev, "master", 1);
     if (!isa_realize(ISA_DEVICE(pri_dev), s->isabus, errp)) {
         return;
@@ -564,7 +569,7 @@ static void i8259_pic_realize(DeviceState *dev, Error **errp)
     sec_dev = DEVICE(&s->i8259[1]);
     qdev_prop_set_uint32(sec_dev, "iobase", 0xa0);
     qdev_prop_set_uint32(sec_dev, "elcr_addr", 0x4d1);
-    qdev_prop_set_uint8(sec_dev, "elcr_mask", 0xde);
+    qdev_prop_set_uint8(sec_dev, "elcr_mask", 0xde & ~(s->edge_irqs >> 8));
     if (!isa_realize(ISA_DEVICE(sec_dev), s->isabus, errp)) {
         return;
     }
@@ -581,6 +586,7 @@ static void i8259_pic_realize(DeviceState *dev, Error **errp)
 static const Property i8259_pic_properties[] = {
     DEFINE_PROP_LINK("bus", I8259PICState, isabus, TYPE_ISA_BUS,
                      ISABus *),
+    DEFINE_PROP_UINT16("edge-irqs", I8259PICState, edge_irqs, 0),
 };
 
 static void i8259_pic_class_init(ObjectClass *klass, const void *data)

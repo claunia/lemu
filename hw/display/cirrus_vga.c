@@ -186,6 +186,7 @@ struct PCICirrusVGAState {
     PCIDevice dev;
     CirrusVGAState cirrus_vga;
     uint32_t bar_mb;
+    MemoryRegion aperture[3];
 };
 
 #define TYPE_PCI_CIRRUS_VGA "cirrus-vga"
@@ -1159,9 +1160,31 @@ static void cirrus_get_params(VGACommonState *s1,
     if (s->vga.cr[VGA_CRTC_MODE] & 0x04) {
         params->line_compare = params->line_compare * 2 + 1;
     }
+    /*
+     * Interlaced (CR1A bit 0): the counter counts the lines of one field.
+     * Without this, line compare 1023 wrapped a 1600x1200 interlaced
+     * screen to its top at line 1024 (SINIX-Z X server).
+     */
+    if (s->vga.cr[0x1a] & 0x01) {
+        params->line_compare = params->line_compare * 2 + 1;
+    }
 
     params->hpel = s->vga.ar[VGA_ATC_PEL];
     params->hpel_split = s->vga.ar[VGA_ATC_MODE] & 0x20;
+}
+
+/*
+ * Above about 85 MHz the 5434 and later clock two 8 bpp pixels at a time:
+ * SR7 selects 16 bpp clocking and the hidden DAC register reads 0x4a. The
+ * CRTC then counts 16 pixels per character. XFree86 uses it for 1280x1024.
+ */
+static bool cirrus_mux8(CirrusVGAState *s)
+{
+    uint8_t bpp = s->vga.sr[0x07] & CIRRUS_SR7_BPP_MASK;
+
+    return (s->vga.sr[0x07] & 0x01) &&
+           (bpp == CIRRUS_SR7_BPP_16 || bpp == CIRRUS_SR7_BPP_16_DOUBLEVCLK) &&
+           (s->cirrus_hidden_dac_data & 0x0f) == 0x0a;
 }
 
 static uint32_t cirrus_get_bpp16_depth(CirrusVGAState * s)
@@ -1197,13 +1220,11 @@ static int cirrus_get_bpp(VGACommonState *s1)
             ret = 8;
             break;
         case CIRRUS_SR7_BPP_16_DOUBLEVCLK:
-            ret = cirrus_get_bpp16_depth(s);
+        case CIRRUS_SR7_BPP_16:
+            ret = cirrus_mux8(s) ? 8 : cirrus_get_bpp16_depth(s);
             break;
         case CIRRUS_SR7_BPP_24:
             ret = 24;
-            break;
-        case CIRRUS_SR7_BPP_16:
-            ret = cirrus_get_bpp16_depth(s);
             break;
         case CIRRUS_SR7_BPP_32:
             ret = 32;
@@ -1234,9 +1255,10 @@ static bool cirrus_native_mode(VGACommonState *s)
 
 static void cirrus_get_resolution(VGACommonState *s, int *pwidth, int *pheight)
 {
+    CirrusVGAState *cs = container_of(s, CirrusVGAState, vga);
     int width, height;
 
-    width = (s->cr[0x01] + 1) * 8;
+    width = (s->cr[0x01] + 1) * (cirrus_mux8(cs) ? 16 : 8);
     height = s->cr[0x12] |
         ((s->cr[0x07] & 0x02) << 7) |
         ((s->cr[0x07] & 0x40) << 3);
@@ -2267,6 +2289,21 @@ static bool cirrus_cursor_image_changed(CirrusVGAState *s)
     return true;
 }
 
+/*
+ * The cursor position counts as the CRTC does: in VCLKs, two pixels each in
+ * clock x2 8 bpp, and in pairs of lines when CR17 bit 2 is set. XFree86
+ * halves both for 1280x1024.
+ */
+static int cirrus_cursor_x(CirrusVGAState *s)
+{
+    return s->vga.hw_cursor_x * (cirrus_mux8(s) ? 2 : 1);
+}
+
+static int cirrus_cursor_y(CirrusVGAState *s)
+{
+    return s->vga.hw_cursor_y * ((s->vga.cr[VGA_CRTC_MODE] & 0x04) ? 2 : 1);
+}
+
 static void cirrus_cursor_invalidate(VGACommonState *s1)
 {
     CirrusVGAState *s = container_of(s1, CirrusVGAState, vga);
@@ -2284,14 +2321,14 @@ static void cirrus_cursor_invalidate(VGACommonState *s1)
     image_changed = size && cirrus_cursor_image_changed(s);
     /* invalidate last cursor and new cursor if any change */
     if (image_changed || s->last_hw_cursor_size != size ||
-        s->last_hw_cursor_x != s->vga.hw_cursor_x ||
-        s->last_hw_cursor_y != s->vga.hw_cursor_y) {
+        s->last_hw_cursor_x != cirrus_cursor_x(s) ||
+        s->last_hw_cursor_y != cirrus_cursor_y(s)) {
 
         invalidate_cursor1(s);
 
         s->last_hw_cursor_size = size;
-        s->last_hw_cursor_x = s->vga.hw_cursor_x;
-        s->last_hw_cursor_y = s->vga.hw_cursor_y;
+        s->last_hw_cursor_x = cirrus_cursor_x(s);
+        s->last_hw_cursor_y = cirrus_cursor_y(s);
         /* compute the real cursor min and max y */
         cirrus_cursor_compute_yrange(s);
         invalidate_cursor1(s);
@@ -2340,8 +2377,8 @@ static bool cirrus_cursor_state(VGACommonState *s1, QemuCursorState *cs)
     const uint8_t *img = cirrus_cursor_image(s, &len);
 
     cs->visible = s->vga.sr[0x12] & CIRRUS_CURSOR_SHOW;
-    cs->x = s->vga.hw_cursor_x;
-    cs->y = s->vga.hw_cursor_y;
+    cs->x = cirrus_cursor_x(s);
+    cs->y = cirrus_cursor_y(s);
     cs->w = size;
     cs->h = size;
     cs->shape = qemu_cursor_shape(0, img, len);
@@ -2364,15 +2401,15 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
     } else {
         h = 32;
     }
-    if (scr_y < s->vga.hw_cursor_y ||
-        scr_y >= (s->vga.hw_cursor_y + h)) {
+    if (scr_y < cirrus_cursor_y(s) ||
+        scr_y >= (cirrus_cursor_y(s) + h)) {
         return;
     }
 
     src = s->vga.vram_ptr + s->real_vram_size - 16 * KiB;
     if (s->vga.sr[0x12] & CIRRUS_CURSOR_LARGE) {
         src += (s->vga.sr[0x13] & 0x3c) * 256;
-        src += (scr_y - s->vga.hw_cursor_y) * 16;
+        src += (scr_y - cirrus_cursor_y(s)) * 16;
         poffset = 8;
         content = ((uint32_t *)src)[0] |
             ((uint32_t *)src)[1] |
@@ -2380,7 +2417,7 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
             ((uint32_t *)src)[3];
     } else {
         src += (s->vga.sr[0x13] & 0x3f) * 256;
-        src += (scr_y - s->vga.hw_cursor_y) * 4;
+        src += (scr_y - cirrus_cursor_y(s)) * 4;
 
 
         poffset = 128;
@@ -2392,10 +2429,10 @@ static void cirrus_cursor_draw_line(VGACommonState *s1, uint8_t *d1, int scr_y)
         return;
     w = h;
 
-    x1 = s->vga.hw_cursor_x;
+    x1 = cirrus_cursor_x(s);
     if (x1 >= s->vga.last_scr_width)
         return;
-    x2 = s->vga.hw_cursor_x + w;
+    x2 = cirrus_cursor_x(s) + w;
     if (x2 > s->vga.last_scr_width)
         x2 = s->vga.last_scr_width;
     w = x2 - x1;
@@ -2926,6 +2963,52 @@ static const MemoryRegionOps cirrus_linear_io_ops = {
     },
 };
 
+/*
+ * The GD5436 decodes 16 MB of linear space as four 4 MB apertures onto
+ * the same memory: the second swaps the bytes of each 16-bit word, the
+ * third those of each 32-bit word, the fourth swaps nothing. The MMIO
+ * registers answer at the top 256 bytes of each, here without a swap.
+ * SINIX-Z's X server uses the ones at 0xffff00.
+ */
+static hwaddr cirrus_aperture_addr(CirrusVGAState *s, hwaddr addr,
+                                   unsigned swap)
+{
+    if ((s->vga.sr[0x17] & 0x44) == 0x44 &&
+        ((addr & s->cirrus_addr_mask & s->linear_mmio_mask) ==
+         s->linear_mmio_mask)) {
+        return addr;
+    }
+    return addr ^ swap;
+}
+
+#define CIRRUS_APERTURE_OPS(n, swap)                                        \
+static uint64_t cirrus_aperture##n##_read(void *opaque, hwaddr addr,        \
+                                          unsigned size)                    \
+{                                                                           \
+    return cirrus_linear_read(opaque,                                       \
+                              cirrus_aperture_addr(opaque, addr, swap),     \
+                              size);                                        \
+}                                                                           \
+static void cirrus_aperture##n##_write(void *opaque, hwaddr addr,           \
+                                       uint64_t val, unsigned size)         \
+{                                                                           \
+    cirrus_linear_write(opaque, cirrus_aperture_addr(opaque, addr, swap),   \
+                        val, size);                                         \
+}                                                                           \
+static const MemoryRegionOps cirrus_aperture##n##_ops = {                   \
+    .read = cirrus_aperture##n##_read,                                      \
+    .write = cirrus_aperture##n##_write,                                    \
+    .endianness = DEVICE_LITTLE_ENDIAN,                                     \
+    .impl = {                                                               \
+        .min_access_size = 1,                                               \
+        .max_access_size = 1,                                               \
+    },                                                                      \
+};
+
+CIRRUS_APERTURE_OPS(1, 1)
+CIRRUS_APERTURE_OPS(2, 3)
+CIRRUS_APERTURE_OPS(3, 0)
+
 static const MemoryRegionOps cirrus_vga_io_ops = {
     .read = cirrus_vga_ioport_read,
     .write = cirrus_vga_ioport_write,
@@ -3091,6 +3174,22 @@ static void pci_cirrus_vga_realize(PCIDevice *dev, Error **errp)
     /* memory #0 LFB */
     /* memory #1 memory-mapped I/O */
     /* XXX: s->vga.vram_size must be a power of two */
+    if (device_id == CIRRUS_ID_CLGD5436 && s->vga.vram_size_mb == 4) {
+        static const MemoryRegionOps *const ops[] = {
+            &cirrus_aperture1_ops, &cirrus_aperture2_ops, &cirrus_aperture3_ops,
+        };
+        static const char *const names[] = {
+            "cirrus-linear-wswap", "cirrus-linear-dswap", "cirrus-linear-ap3",
+        };
+        int i;
+
+        for (i = 0; i < 3; i++) {
+            memory_region_init_io(&d->aperture[i], OBJECT(dev), ops[i], s,
+                                  names[i], 4 * MiB);
+            memory_region_add_subregion(&s->pci_bar, (i + 1) * 4 * MiB,
+                                        &d->aperture[i]);
+        }
+    }
     pci_register_bar(&d->dev, 0, PCI_BASE_ADDRESS_MEM_PREFETCH, &s->pci_bar);
     if (device_id == CIRRUS_ID_CLGD5446) {
         pci_register_bar(&d->dev, 1, 0, &s->cirrus_mmio_io);
@@ -3148,10 +3247,24 @@ static const TypeInfo cirrus_vga_gd5434_info = {
     .class_init    = cirrus_vga_gd5434_class_init,
 };
 
+/* GD5436 variant: 2 MB, no separate MMIO BAR; SINIX-Z's X server wants it */
+static void cirrus_vga_gd5436_class_init(ObjectClass *klass, const void *data)
+{
+    PCI_DEVICE_CLASS(klass)->device_id = CIRRUS_ID_CLGD5436;
+    DEVICE_CLASS(klass)->desc = "Cirrus CLGD 5436 VGA";
+}
+
+static const TypeInfo cirrus_vga_gd5436_info = {
+    .name          = "cirrus-vga-gd5436",
+    .parent        = TYPE_PCI_CIRRUS_VGA,
+    .class_init    = cirrus_vga_gd5436_class_init,
+};
+
 static void cirrus_vga_register_types(void)
 {
     type_register_static(&cirrus_vga_info);
     type_register_static(&cirrus_vga_gd5434_info);
+    type_register_static(&cirrus_vga_gd5436_info);
 }
 
 type_init(cirrus_vga_register_types)
