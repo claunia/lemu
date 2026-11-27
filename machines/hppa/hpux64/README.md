@@ -152,6 +152,9 @@ With `pluto=on`:
   and 53C1010-66, but not the 53C895 or 53C895A.
 - The Diva serial card has the UART interrupt status byte at BAR 0 + 0x1b. 11.31 asio0_intr
   reads it.
+- fcnv from a doubleword reads fr0 as zero (`target/hppa`, for all machines). Before, it
+  read the FP status: the aC++ library sized a string from it, `operator new` threw in a
+  static constructor, and evmd aborted at boot (S020evm FAILED).
 - PAT firmware (branch `hpux1131`): 32-bit LMMIO ranges in the I/O view, -7 (PDC_NE_CELL_MOD)
   at the end of the module list, PDC_PAT_IO 0, the hint table and the hard-fail calls, and
   PDC_IODC_READ of a PCI function by its config address (else lvlnboot stops with "IODC
@@ -159,8 +162,7 @@ With `pluto=on`:
 
 ## Not working yet
 
-- HP-UX 11.31: evmd aborts at boot (S020evm FAILED). PDC_PAT_IO 13 and PDC_PAT_COMPLEX 0
-  and 13 are not there.
+- HP-UX 11.31: PDC_PAT_IO 13 and PDC_PAT_COMPLEX 0 and 13 are not there.
 - A400 without `pluto`: PAT is not complete (`pat_init_cell` and others).
 - With the graphics console, the firmware's boot menu reads only the serial port (no USB
   keyboard in the 64-bit firmware).
