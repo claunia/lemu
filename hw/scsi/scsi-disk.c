@@ -2831,6 +2831,7 @@ typedef struct SCSIDiskReadCdReq {
     uint32_t remaining;   /* sectors */
     int sector_size;      /* bytes of each sector sent */
     int chunk;            /* sectors being read */
+    uint64_t sent;        /* bytes given to the HBA's scatter/gather list */
     uint8_t fields;
     uint8_t sub;
     uint8_t *raw;
@@ -2919,10 +2920,38 @@ static int32_t scsi_disk_read_cd_command(SCSIRequest *req, uint8_t *buf)
     return (int32_t)nb_sectors * rc->sector_size;
 }
 
+/*
+ * Copies @len bytes to the HBA's scatter/gather list, @offset bytes into
+ * it. scsi_req_data() can only fill a list once, from its start, and READ
+ * CD gives the data a chunk at a time.
+ */
+static void scsi_read_cd_to_sg(QEMUSGList *sg, uint64_t offset,
+                               const uint8_t *buf, uint64_t len)
+{
+    for (int i = 0; i < sg->nsg && len > 0; i++) {
+        ScatterGatherEntry *e = &sg->sg[i];
+        dma_addr_t n;
+
+        if (offset >= e->len) {
+            offset -= e->len;
+            continue;
+        }
+        n = MIN(len, e->len - offset);
+        dma_memory_write(sg->as, e->base + offset, buf, n,
+                         MEMTXATTRS_UNSPECIFIED);
+        buf += n;
+        len -= n;
+        offset = 0;
+    }
+}
+
+static void scsi_disk_read_cd_data(SCSIRequest *req);
+
 static void scsi_disk_read_cd_complete(void *opaque, int ret)
 {
     SCSIDiskReadCdReq *rc = opaque;
     SCSIDiskReq *r = &rc->r;
+    uint32_t len = rc->chunk * rc->sector_size;
 
     assert(r->req.aiocb != NULL);
     r->req.aiocb = NULL;
@@ -2946,7 +2975,20 @@ static void scsi_disk_read_cd_complete(void *opaque, int ret)
 
     rc->lba += rc->chunk;
     rc->remaining -= rc->chunk;
-    scsi_req_data(&r->req, rc->chunk * rc->sector_size);
+
+    if (!r->req.sg) {
+        scsi_req_data(&r->req, len);
+        goto done;
+    }
+
+    /* with a scatter/gather list, fill it here and read the next chunk */
+    if (rc->sent < r->req.sg->size) {
+        scsi_read_cd_to_sg(r->req.sg, rc->sent, r->iov.iov_base,
+                           MIN(len, r->req.sg->size - rc->sent));
+    }
+    rc->sent += len;
+    r->req.residual = r->req.sg->size - MIN(rc->sent, r->req.sg->size);
+    scsi_disk_read_cd_data(&r->req);
 
 done:
     scsi_req_unref(&r->req);
