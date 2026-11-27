@@ -2956,6 +2956,10 @@ static void scsi_disk_read_cd_complete(void *opaque, int ret)
     assert(r->req.aiocb != NULL);
     r->req.aiocb = NULL;
 
+    if (r->req.io_canceled) {
+        scsi_req_cancel_complete(&r->req);
+        goto done;
+    }
     if (ret < 0) {
         scsi_check_condition(r, ret == -ENOMEDIUM ? SENSE_CODE(NO_MEDIUM) :
                                                     SENSE_CODE(IO_ERROR));
