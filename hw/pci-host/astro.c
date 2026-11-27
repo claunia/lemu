@@ -389,7 +389,8 @@ static IOMMUTLBEntry astro_translate_iommu(IOMMUMemoryRegion *iommu,
         goto skip;
     }
 
-    index = PDIR_INDEX(addr);
+    /* The I/O PDIR is indexed by the page offset inside the IOVA window. */
+    index = PDIR_INDEX(addr & ~s->tlb_imask);
     pdir_ptr = s->tlb_pdir_base + index * sizeof(entry);
     entry = ldq_le_phys(&address_space_memory, pdir_ptr);
 
@@ -806,6 +807,10 @@ static MemTxResult astro_chip_read_with_attrs(void *opaque, hwaddr addr,
     uint64_t val = -1;
     int index;
 
+    if (s->pluto && addr >= 0x2000 && addr < 0x3000) {
+        addr += 0x20000 - 0x2000;       /* Pluto has its IOC at 0x2000 */
+    }
+
     switch ((addr >> 3) << 3) {
     /* R2I registers */
     case 0x0000:        /* ID */
@@ -849,9 +854,21 @@ static MemTxResult astro_chip_read_with_attrs(void *opaque, hwaddr addr,
     case 0x20108:        /* IOC STATUS_CONTROL */
         val = s->ioc_status_control;
         break;
+    case 0x20300:        /* IOC_IBASE */
+        val = s->tlb_ibase;
+        break;
+    case 0x20308:        /* IOC_IMASK */
+        val = s->tlb_imask;
+        break;
     case 0x20310:        /* IOC_PCOM */
         val = s->tlb_pcom;
         /* TODO: flush iommu */
+        break;
+    case 0x20318:        /* IOC_TCNFG */
+        val = s->tlb_tcnfg;
+        break;
+    case 0x20320:        /* IOC_PDIR_BASE */
+        val = s->tlb_pdir_base;
         break;
     case 0x20400:
         val = s->ioc_flush_control;
@@ -888,6 +905,10 @@ static MemTxResult astro_chip_write_with_attrs(void *opaque, hwaddr addr,
 {
     MemTxResult ret = MEMTX_OK;
     AstroState *s = opaque;
+
+    if (s->pluto && addr >= 0x2000 && addr < 0x3000) {
+        addr += 0x20000 - 0x2000;       /* Pluto has its IOC at 0x2000 */
+    }
 
     trace_astro_chip_write(addr, size, val);
 
@@ -1137,6 +1158,7 @@ static const Property astro_props[] = {
     DEFINE_PROP_UINT8("phys-addr-bits", AstroState, phys_addr_bits, 32),
     DEFINE_PROP_BOOL("rotate-pci-pins", AstroState, rotate_pci_pins, false),
     DEFINE_PROP_BOOL("elroy1-on-rope2", AstroState, elroy1_on_rope2, false),
+    DEFINE_PROP_BOOL("pluto", AstroState, pluto, false),
 };
 
 static void astro_class_init(ObjectClass *klass, const void *data)
