@@ -32,6 +32,11 @@ commit.
 
 - It runs four builds at once: `build-mac.sh`, `build-linux.sh amd64`,
   `build-linux.sh arm64` and `build-windows.sh`. Each can also run alone.
+- Each first runs `get-libaaruformat.sh`, which fetches libaaruformat
+  (AaruFormat images) into `subprojects/libaaruformat` at the commit
+  `subprojects/libaaruformat.wrap` pins, with its submodules. The Docker
+  builds fetch nothing. A checkout already there must be at that commit,
+  or the build stops: remove it and run again.
 - The binaries and their libraries land in `OUT/macos-arm64`,
   `OUT/linux-x86_64`, `OUT/linux-aarch64` and `OUT/windows-x86_64`.
 - `OUT/rc` must show exit code 0 for all four. The logs are in

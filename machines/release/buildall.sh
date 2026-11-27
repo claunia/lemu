@@ -6,15 +6,8 @@
 [ $# -eq 2 ] || { echo "usage: $0 SRC OUT" >&2; exit 1; }
 SRC=$1 OUT=$2 D=$(cd "$(dirname "$0")" && pwd)
 mkdir -p $OUT; : > $OUT/rc
-# The containers copy the source without fetching anything: get
-# libaaruformat (subprojects/libaaruformat.wrap) here first.
-W=$SRC/subprojects/libaaruformat.wrap
-if [ ! -d $SRC/subprojects/libaaruformat ]; then
-    git clone -q --recursive -c advice.detachedHead=false \
-        --branch "$(sed -n 's/^revision *= *//p' $W)" \
-        "$(sed -n 's/^url *= *//p' $W)" $SRC/subprojects/libaaruformat ||
-        { echo "could not get libaaruformat" >&2; exit 1; }
-fi
+# The builds run at once: get libaaruformat once, before them
+sh $D/get-libaaruformat.sh $SRC || exit 1
 (sh $D/build-mac.sh $SRC $OUT > $OUT/mac.log 2>&1; echo "mac $?" >> $OUT/rc) &
 (sh $D/build-linux.sh amd64 $SRC $OUT > $OUT/amd64.log 2>&1; echo "amd64 $?" >> $OUT/rc) &
 (sh $D/build-linux.sh arm64 $SRC $OUT > $OUT/arm64.log 2>&1; echo "arm64 $?" >> $OUT/rc) &

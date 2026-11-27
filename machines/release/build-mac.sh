@@ -17,6 +17,7 @@ BINS="qemu-system-i386 qemu-system-ppc qemu-system-ppc64 qemu-system-alpha qemu-
 export MACOSX_DEPLOYMENT_TARGET=15.0
 # libaaruformat (AaruFormat images) is built with CMake
 command -v cmake >/dev/null || { echo "cmake is needed: brew install cmake" >&2; exit 1; }
+sh $R/get-libaaruformat.sh $SRC
 mkdir -p $B && cd $B
 $SRC/configure --target-list=i386-softmmu,ppc-softmmu,ppc64-softmmu,alpha-softmmu,mips64el-softmmu,mips64-softmmu,hppa-softmmu,sparc-softmmu,m68k-softmmu \
   --without-default-features --enable-system --enable-tcg --enable-hmp \

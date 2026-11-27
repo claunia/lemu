@@ -11,6 +11,7 @@ BINS="qemu-system-i386 qemu-system-ppc qemu-system-ppc64 qemu-system-alpha qemu-
 if [ "$1" != --container ]; then
     [ $# -eq 3 ] || { echo "usage: $0 amd64|arm64 SRC OUT" >&2; exit 1; }
     mkdir -p "$3"
+    sh "$(dirname "$0")/get-libaaruformat.sh" "$2"
     exec docker run --rm --platform "linux/$1" \
         -e "PKGVERSION=$(git -C "$2" describe --match 'v*' --dirty 2>/dev/null)" \
         -v "$(cd "$2" && pwd):/src:ro" -v "$(cd "$(dirname "$0")" && pwd):/work:ro" \
