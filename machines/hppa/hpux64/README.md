@@ -2,14 +2,17 @@
 
 **TL;DR** `-M C3700` runs 64-bit HP-UX 11i v1 (B.11.11) and 11i v2 (B.11.23) on one
 PA-8700 CPU. Both install from their CDs, boot from disk to the console login, and run
-Java. Seven QEMU changes and four firmware changes make this work. There is no kit yet.
+Java and CDE on an emulated HP VISUALIZE-EG PCI card. Eight QEMU changes and seven firmware
+changes make this work. There is no kit yet.
 
 ## Run
 
 [run.sh](run.sh) `11.11` or `11.23` starts LEMU's build (`build/qemu-system-hppa`, or
 `$QEMU`) with the disk `hpux1111.qcow2` or `hpux1123.qcow2` on SCSI ID 6. The console is
-the first serial port, in the terminal (`-nographic`). Ctrl-A c goes to the QEMU monitor
-and back, Ctrl-A x quits QEMU. Halt HP-UX first with `reboot -h`.
+the first serial port, in the terminal (`-serial mon:stdio`). Ctrl-A c goes to the QEMU
+monitor and back, Ctrl-A x quits QEMU. Halt HP-UX first with `reboot -h`. A window shows the
+graphics card (`-device artist-pci`, see Graphics). `GFX=0 ./run.sh 11.11` runs without the
+card and the window (`-nographic`).
 
 The network is QEMU's user network. The install leaves the LAN card without an address,
 and `/etc/hosts` gives the host name 127.0.0.1. Then DCE `rpcd` stops at boot ("Start
@@ -21,6 +24,25 @@ the time. Give the guest QEMU's address 10.0.2.15, change the host name's line i
     ch_rc -a -p 'ROUTE_DESTINATION[0]=default' -p 'ROUTE_GATEWAY[0]=10.0.2.2' -p 'ROUTE_COUNT[0]=1' /etc/rc.config.d/netconf
 
 Then `telnet 127.0.0.1 11113` (11.11) or `11233` (11.23) reaches the guest.
+
+## Graphics
+
+`-device artist-pci` adds an HP VISUALIZE-EG (A4977A): the Artist chip of the B160L on a
+PCI card, with an STI ROM (`pc-bios/hppa-sti-artist.rom`). HP-UX claims it as "PCI Display
+(103c1005)" (driver `graph3`), runs the ITE on it, and X and CDE use it. The keyboard and
+mouse are the C3700's USB ones. The firmware and the system console stay on the serial
+port.
+
+A disk installed without the card needs three changes. Make them once, with the card:
+
+- 11.23 only: the kernel has no graphics drivers. Add them and reboot:
+  `kcmodule graph3=static gvid=static gvid_core=static ite=static`.
+  11.11 has them already.
+- At boot without graphics, `/usr/dt/config/dtrc.d/20_graph_conf` comments out the
+  `Local` line in `/etc/dt/config/Xservers`, and it does not put it back. Then dtlogin
+  starts no X server. Fix: `cp /usr/dt/config/Xservers /etc/dt/config/Xservers`.
+- The first boot with the card asks for the USB keyboard language on the serial console
+  (26 is US English). The answer goes to `/etc/kbdlang`.
 
 ## Install
 
@@ -62,6 +84,11 @@ Then `telnet 127.0.0.1 11113` (11.11) or `11233` (11.23) reaches the guest.
   `out_rri` the constant as a register number, and the result took bits of host register
   x0. This broke the stubs that the HotSpot JVM writes, and `ServCtlMgr` on 11.11 hung.
   Now two constant inputs give one `movi`.
+- **artist-pci** (`hw/display/artist.c`). The Artist (`TYPE_ARTIST`) in a PCI card,
+  vendor HP, device 0x1005. BAR 0 (32 MB) holds the registers and, at 16 MB, the frame
+  buffer, as on the B160L. The expansion ROM holds the STI ROM. The ROM also shows at the
+  start of BAR 0: the STI region list puts region 0 (the ROM) there, and HP-UX finds the
+  card's display by that address.
 - Debug aid: the trace event `hppa_tlb_ar_fault` shows access-rights faults.
 
 ## Firmware
@@ -76,11 +103,21 @@ LEMU's SeaBIOS-hppa 27 with four changes, from github.com/tenox7/seabios-hppa br
    IODC max address".
 3. IODC disk I/O uses the drive in the layers, not always the boot drive.
 4. PDC_RDR (144) gives PDC_BAD_PROC without a warning. 11.11 calls it again and again.
+5. Big PCI BARs (the card's 32 MB) go to the LMMIO space, each at the next free,
+   size-aligned address. Before, the PCI window gave the small BARs no space.
+6. The STI code builds for 64 bits too: 64-bit HP-UX calls the ROM's 64-bit routines
+   (alternate code type PA-RISC 64) with 64-bit pointers. HP-UX copies each routine to
+   RAM on its own, so a routine calls no code outside of it.
+7. `make parisc` also builds `out/hppa-sti-artist.rom` (`scripts/buildstirom.py`): a PCI
+   ROM header, the region map and the STI ROM with 32- and 64-bit code. It keeps the
+   Artist's graphics ID: HP-UX has its own routines for the real EG's ID, and they need
+   STI regions that the device does not have.
 
 ## Not working yet
 
 - HP-UX 11i v3 (B.11.31): "ccio/sba driver not found". It needs PAT firmware.
 - A400: PAT is not complete (`pat_init_cell` and others).
-- No graphics console for 64-bit HP-UX: serial only.
+- The firmware's boot menu and messages are on the serial port only. Its STI console
+  knows only the B160L's Artist, not the PCI card.
 - Crash dumps through IODC: ENTRY_IO on the Elroy returns BAD_OPTION.
 - Only one CPU is tested.

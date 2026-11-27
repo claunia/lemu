@@ -15,6 +15,13 @@ shift
 # The serial console and the QEMU monitor share this terminal: Ctrl-A c switches between
 # them, Ctrl-A x quits QEMU. Halt HP-UX first with reboot -h.
 # The guest has the fixed address 10.0.2.15 (QEMU's user network): telnet 127.0.0.1 $port.
+# A window shows an HP VISUALIZE-EG PCI card (artist-pci): the HP-UX ITE and CDE (see
+# README.md). GFX=0 ./run.sh ... runs without the card and the window.
+if [ "${GFX:-1}" = 0 ]; then
+	gfx="-nographic"
+else
+	gfx="-device artist-pci -serial mon:stdio"
+fi
 exec "$q" \
 	-name "$name PA-RISC C3700" \
 	-M C3700 -smp 1 -m 2048 \
@@ -22,5 +29,5 @@ exec "$q" \
 	-boot c -boot menu=off \
 	-drive if=scsi,bus=0,index=6,file="$disk",format=qcow2 \
 	-nic user,model=tulip,hostfwd=tcp:127.0.0.1:$port-10.0.2.15:23 \
-	-nographic -audio none \
+	$gfx -audio none \
 	"$@"
