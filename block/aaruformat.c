@@ -35,6 +35,7 @@
 #include "block/thread-pool.h"
 #include "qemu/coroutine.h"
 #include "qemu/cutils.h"
+#include "qemu/error-report.h"
 #include "qemu/memalign.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
@@ -51,6 +52,7 @@
 #define AARUFORMAT_OPT_COMPRESSION_TYPE "compression_type"
 #define AARUFORMAT_OPT_DEDUPLICATE      "deduplicate"
 #define AARUFORMAT_OPT_TABLE_SHIFT      "table_shift"
+#define AARUFORMAT_OPT_ERROR_RECOVERY   "error_recovery"
 
 #define AARUFORMAT_RT_COMPRESS         "compress"
 #define AARUFORMAT_RT_COMPRESSION_TYPE "compression-type"
@@ -73,6 +75,7 @@ typedef struct BDRVAaruFormatState {
     uint32_t cluster_size;
     char application[65];
     char application_version[33];
+    bool error_recovery;    /* the image has error recovery data */
     bool compress;
     bool zstd;
     bool deduplicate;
@@ -100,6 +103,7 @@ typedef struct AaruFormatPendingCreate {
     bool compress;
     bool zstd;
     bool deduplicate;
+    uint8_t recovery;
     QLIST_ENTRY(AaruFormatPendingCreate) next;
 } AaruFormatPendingCreate;
 
@@ -113,10 +117,11 @@ static void __attribute__((constructor)) aaruformat_pending_init(void)
 }
 
 static void aaruformat_pending_add(const char *path, bool compress, bool zstd,
-                                   bool deduplicate)
+                                   bool deduplicate, uint8_t recovery)
 {
     AaruFormatPendingCreate *p = g_new0(AaruFormatPendingCreate, 1);
 
+    p->recovery = recovery;
     p->path = g_strdup(path);
     p->compress = compress;
     p->zstd = zstd;
@@ -128,7 +133,8 @@ static void aaruformat_pending_add(const char *path, bool compress, bool zstd,
 }
 
 static bool aaruformat_pending_take(const char *path, bool *compress,
-                                    bool *zstd, bool *deduplicate)
+                                    bool *zstd, bool *deduplicate,
+                                    uint8_t *recovery)
 {
     AaruFormatPendingCreate *p;
     bool found = false;
@@ -139,6 +145,7 @@ static bool aaruformat_pending_take(const char *path, bool *compress,
             *compress = p->compress;
             *zstd = p->zstd;
             *deduplicate = p->deduplicate;
+            *recovery = p->recovery;
             QLIST_REMOVE(p, next);
             g_free(p->path);
             g_free(p);
@@ -579,6 +586,7 @@ static int aaruformat_open_ctx(BDRVAaruFormatState *s, bool writable,
     pstrcpy(s->application, sizeof(s->application), info.application);
     pstrcpy(s->application_version, sizeof(s->application_version),
             info.application_version);
+    s->error_recovery = info.error_recovery;
 
     switch (info.media) {
     case AARU_LIB_MEDIA_BLOCK:
@@ -623,6 +631,7 @@ static int aaruformat_open(BlockDriverState *bs, QDict *options, int flags,
     BDRVAaruFormatState *s = bs->opaque;
     QemuOpts *opts = NULL;
     const char *path;
+    uint8_t recovery = 0;
     bool writable;
     int ret;
 
@@ -643,7 +652,8 @@ static int aaruformat_open(BlockDriverState *bs, QDict *options, int flags,
     s->compress = false;
     s->zstd = false;
     s->deduplicate = true;
-    aaruformat_pending_take(s->path, &s->compress, &s->zstd, &s->deduplicate);
+    aaruformat_pending_take(s->path, &s->compress, &s->zstd, &s->deduplicate,
+                            &recovery);
 
     opts = qemu_opts_create(&aaruformat_runtime_opts, NULL, 0, &error_abort);
     if (!qemu_opts_absorb_qdict(opts, options, errp)) {
@@ -683,6 +693,28 @@ static int aaruformat_open(BlockDriverState *bs, QDict *options, int flags,
     }
     if (ret < 0) {
         goto fail;
+    }
+
+    if (s->writable && recovery) {
+        /*
+         * Just created with error recovery: it covers what this session
+         * writes, so the zero sector 0 of the creation goes in again.
+         */
+        uint8_t *zero = g_malloc0(s->sector_size);
+
+        if (aaru_lib_set_error_recovery(s->ctx, recovery) < 0 ||
+            aaru_lib_write_sector(s->ctx, 0, zero, s->sector_size) < 0) {
+            g_free(zero);
+            error_setg(errp, "Could not add error recovery to the image");
+            ret = -EIO;
+            goto fail;
+        }
+        g_free(zero);
+        s->error_recovery = true;
+    } else if (s->writable && s->error_recovery) {
+        warn_report("AaruFormat image '%s' has error recovery data, which "
+                    "writing to it drops; qemu-img convert -o "
+                    "error_recovery=N makes a new copy with it", s->path);
     }
 
     if (s->optical) {
@@ -947,6 +979,7 @@ static ImageInfoSpecific *aaruformat_get_specific_info(BlockDriverState *bs,
                                        AARU_FORMAT_METADATA_TYPE_BLOCK;
     info->sector_size = s->sector_size;
     info->sectors = s->sectors;
+    info->error_recovery = s->error_recovery;
 
     if (s->application[0]) {
         info->application = g_strdup(s->application);
@@ -1010,6 +1043,7 @@ aaruformat_co_do_create(BlockdevCreateOptions *options, Error **errp)
     bool zstd = opts->has_compression_type &&
                 opts->compression_type == AARU_FORMAT_COMPRESSION_ZSTD;
     bool deduplicate = !opts->has_deduplicate || opts->deduplicate;
+    uint8_t recovery = opts->has_error_recovery ? opts->error_recovery : 0;
     static const char app[] = "LEMU";
     g_autofree char *options_str = NULL;
     BlockDriverState *bs_file;
@@ -1026,6 +1060,11 @@ aaruformat_co_do_create(BlockdevCreateOptions *options, Error **errp)
     if (opts->size == 0 || opts->size % sector_size) {
         error_setg(errp, "Image size must be a non-zero multiple of the "
                    "sector size (%u)", sector_size);
+        return -EINVAL;
+    }
+
+    if (recovery > 100) {
+        error_setg(errp, "Error recovery must be a percentage from 0 to 100");
         return -EINVAL;
     }
 
@@ -1053,14 +1092,15 @@ aaruformat_co_do_create(BlockdevCreateOptions *options, Error **errp)
 
     if (aaru_lib_create(path, AARU_LIB_GENERIC_HDD, sector_size,
                         opts->size / sector_size, options_str, app,
-                        QEMU_VERSION_MAJOR, QEMU_VERSION_MINOR) < 0) {
+                        QEMU_VERSION_MAJOR, QEMU_VERSION_MINOR,
+                        recovery) < 0) {
         error_setg(errp, "Could not create AaruFormat image '%s' (error %d)",
                    path, errno);
         ret = -EIO;
         goto out;
     }
 
-    aaruformat_pending_add(path, compress, zstd, deduplicate);
+    aaruformat_pending_add(path, compress, zstd, deduplicate, recovery);
 
 out:
     bdrv_co_unref(bs_file);
@@ -1094,6 +1134,7 @@ aaruformat_co_create_opts(BlockDriver *drv, const char *filename,
         { AARUFORMAT_OPT_SECTOR_SIZE,      "sector-size" },
         { AARUFORMAT_OPT_COMPRESSION_TYPE, "compression-type" },
         { AARUFORMAT_OPT_TABLE_SHIFT,      "table-shift" },
+        { AARUFORMAT_OPT_ERROR_RECOVERY,   "error-recovery" },
         { NULL, NULL },
     }, &error_abort);
 
@@ -1185,6 +1226,14 @@ static QemuOptsList aaruformat_create_opts = {
             .help = "Sectors per secondary deduplication table, as a power "
                     "of two (0 for a single table)",
             .def_value_str = "12"
+        },
+        {
+            .name = AARUFORMAT_OPT_ERROR_RECOVERY,
+            .type = QEMU_OPT_NUMBER,
+            .help = "Percentage of error recovery data (erasure coding) for "
+                    "the data written right after creating the image, as "
+                    "Aaru's --error-recovery (0: none)",
+            .def_value_str = "0"
         },
         { /* end of list */ }
     }

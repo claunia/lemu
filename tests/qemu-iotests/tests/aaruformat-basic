@@ -90,6 +90,22 @@ for opts in "" "-o compress=on,compression_type=zstd" "-c" \
     cmp "$TEST_IMG.raw" "$TEST_IMG.back" && echo "same data"
 done
 
+echo "== error recovery =="
+_rm_test_img "$TEST_IMG.conv"
+$QEMU_IMG convert -f raw -O $IMGFMT -o error_recovery=25,table_shift=8 \
+    "$TEST_IMG.raw" "$TEST_IMG.conv"
+$QEMU_IMG info "$TEST_IMG.conv" | grep "error recovery"
+# damage the payload of a user data block, which error recovery rebuilds
+python3 -I - "$TEST_IMG.conv" <<'PYEOF'
+import mmap, struct, sys
+with open(sys.argv[1], 'r+b') as f, mmap.mmap(f.fileno(), 0) as m:
+    pos = m.find(b'DBLK', 512)
+    while struct.unpack_from('<H', m, pos + 4)[0] != 1:
+        pos = m.find(b'DBLK', pos + 4)
+    m[pos + 4096:pos + 4096 + 1024] = b'\xee' * 1024
+PYEOF
+$QEMU_IMG compare -f raw -F $IMGFMT "$TEST_IMG.raw" "$TEST_IMG.conv"
+
 echo "== sector size 4096 =="
 _rm_test_img "$TEST_IMG.conv"
 $QEMU_IMG create -f $IMGFMT -o sector_size=4096 "$TEST_IMG.conv" 1M | \

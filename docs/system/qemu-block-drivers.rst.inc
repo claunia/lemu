@@ -418,6 +418,15 @@ This section describes each format and the options that are supported for it.
 
     Store identical sectors once (default: ``on``).
 
+  .. option:: error_recovery
+
+    Percentage (1 to 100) of error recovery data (erasure coding) to add,
+    as Aaru's ``--error-recovery`` (default: 0, none). Damaged blocks of
+    the image are rebuilt from it when read. It covers the data written
+    right after the image is created, as by ``qemu-img convert -O
+    aaruformat -o error_recovery=10``; writing to the image later, from a
+    VM, drops it. ``qemu-img info`` shows whether an image has it.
+
   .. option:: table_shift
 
     Sectors per secondary deduplication table, as a power of two

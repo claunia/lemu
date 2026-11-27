@@ -229,6 +229,8 @@
 #
 # @tracks: number of tracks, for optical discs
 #
+# @error-recovery: the image has error recovery (erasure coding) data
+#
 # Since: 11.2
 ##
 { 'struct': 'ImageInfoSpecificAaruFormat',
@@ -238,7 +240,8 @@
             'sectors': 'uint64',
             '*application': 'str',
             '*application-version': 'str',
-            '*tracks': 'uint32' },
+            '*tracks': 'uint32',
+            'error-recovery': 'bool' },
   'if': 'CONFIG_AARUFORMAT' }
 
 ##
@@ -5485,6 +5488,10 @@
 # @table-shift: Sectors per secondary deduplication table as a power
 #     of two, 0 for a single table (default: 12)
 #
+# @error-recovery: Percentage (1 to 100) of error recovery data, as
+#     Aaru's --error-recovery, for the data written right after
+#     creating the image; 0 for none (default: 0)
+#
 # Since: 11.2
 ##
 { 'struct': 'BlockdevCreateOptionsAaruFormat',
@@ -5494,7 +5501,8 @@
             '*compress':           'bool',
             '*compression-type':   'AaruFormatCompression',
             '*deduplicate':        'bool',
-            '*table-shift':        'uint8' },
+            '*table-shift':        'uint8',
+            '*error-recovery':     'uint8' },
   'if': 'CONFIG_AARUFORMAT' }
 
 ##

@@ -89,6 +89,8 @@ AaruLib *aaru_lib_open(const char *path, bool writable, const char *options,
     info->sector_size = image_info.SectorSize;
     info->sectors = image_info.Sectors;
     info->data_shift = ctx->user_data_ddt_header.dataShift;
+    info->error_recovery =
+        !!(ctx->header.featureCompatibleRo & AARU_FEATURE_ROCOMPAT_ERASURE);
     copy_string(info->application, sizeof(info->application),
                 image_info.Application, sizeof(image_info.Application));
     copy_string(info->application_version, sizeof(info->application_version),
@@ -106,7 +108,7 @@ int aaru_lib_close(AaruLib *img)
 int aaru_lib_create(const char *path, uint32_t media_type,
                     uint32_t sector_size, uint64_t sectors,
                     const char *options, const char *application,
-                    uint8_t major, uint8_t minor)
+                    uint8_t major, uint8_t minor, uint8_t recovery_percent)
 {
     void *ctx = aaruf_create(path, media_type, sector_size, sectors, 0, 0,
                              options, (const uint8_t *)application,
@@ -117,6 +119,12 @@ int aaru_lib_create(const char *path, uint32_t media_type,
     int ret = AARU_LIB_OK;
 
     if (!ctx) {
+        return AARU_LIB_ERROR;
+    }
+
+    if (recovery_percent &&
+        aaruf_set_erasure_coding_auto(ctx, recovery_percent) < 0) {
+        aaruf_close(ctx);
         return AARU_LIB_ERROR;
     }
 
@@ -195,6 +203,12 @@ int aaru_lib_set_compression(AaruLib *img, bool enabled, bool zstd)
 {
     return aaruf_set_compression(img, enabled, zstd) < 0 ? AARU_LIB_ERROR :
                                                             AARU_LIB_OK;
+}
+
+int aaru_lib_set_error_recovery(AaruLib *img, uint8_t percent)
+{
+    return aaruf_set_erasure_coding_auto(img, percent) < 0 ? AARU_LIB_ERROR :
+                                                              AARU_LIB_OK;
 }
 
 int aaru_lib_get_tracks(AaruLib *img, AaruLibTrack **tracks, int *count)
