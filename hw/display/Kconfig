@@ -104,6 +104,7 @@ config P9100
 
 config ARTIST
     bool
+    depends on PCI
     select FRAMEBUFFER
 
 config VGA

@@ -20,6 +20,7 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "migration/qemu-file-types.h"
+#include "migration/cpu.h"
 #include "migration/vmstate.h"
 #include "qemu/timer.h"
 
@@ -204,8 +205,32 @@ static const VMStateField vmstate_env_fields[] = {
     VMSTATE_END_OF_LIST()
 };
 
+static bool power_btn_needed(void *opaque)
+{
+    CPUHPPAState *env = opaque;
+
+    return env->power_btn != 0;
+}
+
+/*
+ * The soft power switch word of the firmware (CPU 0 HPA + 32). loadvm
+ * resets the machine first, and 0 there means "button pressed": without
+ * this the guest powers off after a load.
+ */
+static const VMStateDescription vmstate_power_btn = {
+    .name = "env/power_btn",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = power_btn_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINTTL(power_btn, CPUHPPAState),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
 static const VMStateDescription * const vmstate_env_subsections[] = {
     &vmstate_tlb,
+    &vmstate_power_btn,
     NULL
 };
 

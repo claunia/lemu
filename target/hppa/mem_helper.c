@@ -231,21 +231,21 @@ static int match_prot_id32(CPUHPPAState *env, uint32_t access_id)
     return 0;
 }
 
+/*
+ * A write is allowed when any PID that matches has write disable clear,
+ * not only the first one. HP-UX 11.23 puts the same 16-bit ID in two
+ * PIDs, one with WD set (PID1 0x6e3a|WD, PID2 0x16e3a), and loops in
+ * fast_resolvepid2_0 if the first match decides.
+ */
 static int match_prot_id64(CPUHPPAState *env, uint32_t access_id)
 {
-    int r, i;
+    int r = 0, i;
 
     for (i = CR_PID1; i <= CR_PID4; ++i) {
-        r = match_prot_id_1(access_id, env->cr[i]);
-        if (r) {
-            return r;
-        }
-        r = match_prot_id_1(access_id, env->cr[i] >> 32);
-        if (r) {
-            return r;
-        }
+        r |= match_prot_id_1(access_id, env->cr[i]);
+        r |= match_prot_id_1(access_id, env->cr[i] >> 32);
     }
-    return 0;
+    return r;
 }
 
 int hppa_get_physical_address(CPUHPPAState *env, vaddr addr, int mmu_idx,
@@ -321,6 +321,8 @@ int hppa_get_physical_address(CPUHPPAState *env, vaddr addr, int mmu_idx,
     }
 
     if (unlikely(!(prot & type))) {
+        trace_hppa_tlb_ar_fault(env, addr, type, priv, ent->ar_type,
+                                ent->ar_pl1, ent->ar_pl2, ent->access_id);
         /* Not allowed -- Inst/Data Memory Access Rights Fault. */
         ret = (type & PAGE_EXEC) ? EXCP_IMP : EXCP_DMAR;
         goto egress;
@@ -332,6 +334,9 @@ int hppa_get_physical_address(CPUHPPAState *env, vaddr addr, int mmu_idx,
                            ? match_prot_id64(env, ent->access_id)
                            : match_prot_id32(env, ent->access_id));
         if (unlikely(!(type & access_prot))) {
+            trace_hppa_tlb_pid_fault(env, addr, type, ent->access_id,
+                                     env->cr[CR_PID1], env->cr[CR_PID2],
+                                     env->cr[CR_PID3], env->cr[CR_PID4]);
             /* Not allowed -- Inst/Data Memory Protection Id Fault. */
             ret = type & PAGE_EXEC ? EXCP_IMP : EXCP_DMPI;
             goto egress;

@@ -97,6 +97,10 @@ struct AstroState {
 
     IOMMUMemoryRegion iommu;
     AddressSpace iommu_as;
+
+    /* PCI writes to 0xfee00000-0xfeefffff: interrupt transactions */
+    MemoryRegion int_txn;
+    AddressSpace int_txn_as;
 };
 
 #endif
