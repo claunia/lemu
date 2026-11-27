@@ -1365,7 +1365,15 @@ static void next_machine_init(MachineState *machine)
         return;
     }
 
-    cpu = M68K_CPU(cpu_create(machine->cpu_type));
+    cpu = M68K_CPU(object_new(machine->cpu_type));
+    /*
+     * NeXTSTEP's printf uses FMOVE.P, which the 68040 traps to the FPSP:
+     * the NeXT FPSP needs FSAVE frames QEMU does not make, and loops on
+     * the trap for ever. Convert packed decimal as the 68882 does.
+     */
+    object_property_set_str(OBJECT(cpu), "packed-decimal", "on",
+                            &error_fatal);
+    qdev_realize_and_unref(DEVICE(cpu), NULL, &error_fatal);
     cpu->env.nextstep_idle = m->nextstep_idle;
     qemu_register_reset(next_cpu_reset, cpu);
 
