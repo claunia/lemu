@@ -160,6 +160,30 @@ With `pluto=on`:
   PDC_IODC_READ of a PCI function by its config address (else lvlnboot stops with "IODC
   max address", as on 11.23 before fix 2).
 
+### CDE on 11.31
+
+The 11.31 PA X server has no Artist driver. It has the XFree86 4.2 radeon driver, and the
+gvid driver takes a Radeon 7500. Add the card (the console stays on the serial port):
+
+```
+  -device ati-vga,model=rv200,x-linear-aper-size=0x4000000 -serial mon:stdio
+```
+
+- `model=rv200` is 1002:5157, emulated as the RV100. gvid maps 64 MB from every memory BAR
+  of this card, so the aperture is 64 MB too.
+- The Elroys are Mercury LBAs (hv 0x783) at SBA + 0x20000 + rope * 0x2000, as on an
+  rp34x0. gvid looks for them there.
+- The firmware puts the small BARs right above the big ones. The kernel refuses gvid's
+  64 MB map of the register BAR if it overlaps the frame buffer or the I/O ports.
+- The PLL registers (CLOCK_CNTL_INDEX and DATA) work. The X server waits for
+  PPLL_REF_DIV.
+- USB is a NEC OHCI: 11.31 does not take the Apple one. Kernel modules: `hcd`, `hub`,
+  `hid`, `usbd`, `gvid`, `gvid_core` (kcmodule ...=static).
+- Install CDE-English from DVD 1: Ignite leaves it out.
+- A boot without a graphics card makes `/usr/dt/config/dtrc.d/20_graph_conf` comment out
+  the Local line in `/etc/dt/config/Xservers`. It does not put it back. Before the next
+  boot with the card: `cp /usr/dt/config/Xservers /etc/dt/config/Xservers`.
+
 ## Not working yet
 
 - HP-UX 11.31: PDC_PAT_IO 13 and PDC_PAT_COMPLEX 0 and 13 are not there.
