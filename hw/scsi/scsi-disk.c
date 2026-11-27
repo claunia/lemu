@@ -1553,6 +1553,7 @@ static int scsi_disk_emulate_mode_sense(SCSIDiskReq *r, uint8_t *outbuf)
 static int scsi_disk_emulate_read_toc(SCSIRequest *req, uint8_t *outbuf)
 {
     SCSIDiskState *s = DO_UPCAST(SCSIDiskState, qdev, req->dev);
+    SCSIDiskReq *r = DO_UPCAST(SCSIDiskReq, req, req);
     int start_track, format, msf, toclen;
     uint64_t nb_sectors;
     g_autofree BlockCdToc *toc = NULL;
@@ -1569,7 +1570,7 @@ static int scsi_disk_emulate_read_toc(SCSIRequest *req, uint8_t *outbuf)
         case 1:
             return cdrom_read_session_info(toc, outbuf, msf);
         case 2:
-            return cdrom_read_toc_raw_tracks(toc, outbuf);
+            return cdrom_read_toc_raw_tracks(toc, outbuf, r->buflen);
         default:
             return -1;
         }

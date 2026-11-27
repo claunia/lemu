@@ -1264,7 +1264,8 @@ static void cmd_read_toc_pma_atip(IDEState *s, uint8_t* buf)
             len = cdrom_read_session_info(s->cd_toc, buf, msf);
             break;
         case 2:
-            len = cdrom_read_toc_raw_tracks(s->cd_toc, buf);
+            len = cdrom_read_toc_raw_tracks(s->cd_toc, buf,
+                                            s->io_buffer_total_len);
             break;
         default:
             len = -1;

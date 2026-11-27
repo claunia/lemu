@@ -127,7 +127,8 @@ int cdrom_read_toc_raw(int nb_sectors, uint8_t *buf, int msf, int session_num);
 int cdrom_read_toc_tracks(const BlockCdToc *toc, uint8_t *buf, int msf,
                           int start_track);
 int cdrom_read_session_info(const BlockCdToc *toc, uint8_t *buf, int msf);
-int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf);
+/* Writes at most @size bytes; returns the bytes written */
+int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf, int size);
 /* READ CD: @fields is byte 9 of the command, @sub its subchannel selection */
 bool cdrom_read_cd_type_matches(const BlockCdTrack *t, int expected);
 int cdrom_read_cd_sector_size(const BlockCdTrack *t, uint8_t fields,

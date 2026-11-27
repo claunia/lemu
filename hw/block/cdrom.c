@@ -247,30 +247,39 @@ int cdrom_read_session_info(const BlockCdToc *toc, uint8_t *buf, int msf)
     return 12;
 }
 
-static uint8_t *cdrom_put_raw_descriptor(uint8_t *q, uint8_t session,
-                                         uint8_t adr_control, uint8_t point,
-                                         uint8_t pmin, uint8_t psec,
-                                         uint8_t pframe)
+/*
+ * Adds an 11-byte descriptor of a full TOC at *len, if it fits in @size
+ * bytes. *len counts it even when it does not fit, so the TOC length is
+ * the one of the whole TOC, and the guest gets what its buffer holds.
+ */
+static void cdrom_put_raw_descriptor(uint8_t *buf, int size, int *len,
+                                     uint8_t session, uint8_t adr_control,
+                                     uint8_t point, uint8_t pmin, uint8_t psec,
+                                     uint8_t pframe)
 {
-    *q++ = session;
-    *q++ = adr_control;
-    *q++ = 0;     /* TNO */
-    *q++ = point;
-    *q++ = 0;     /* ATIME */
-    *q++ = 0;
-    *q++ = 0;
-    *q++ = 0;     /* zero */
-    *q++ = pmin;
-    *q++ = psec;
-    *q++ = pframe;
-    return q;
+    if (*len + 11 <= size) {
+        uint8_t *q = buf + *len;
+
+        q[0] = session;
+        q[1] = adr_control;
+        q[2] = 0;     /* TNO */
+        q[3] = point;
+        q[4] = 0;     /* ATIME */
+        q[5] = 0;
+        q[6] = 0;
+        q[7] = 0;     /* zero */
+        q[8] = pmin;
+        q[9] = psec;
+        q[10] = pframe;
+    }
+    *len += 11;
 }
 
-int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf)
+int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf, int size)
 {
-    uint8_t *q = buf + 4;
-    int len;
+    int len = 4;
 
+    assert(size >= 4);
     buf[2] = toc->first_session;
     buf[3] = toc->last_session;
 
@@ -291,29 +300,31 @@ int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf)
             continue;
         }
 
-        q = cdrom_put_raw_descriptor(q, session, cdrom_track_adr_control(first),
-                                     0xa0, first->number, toc->disc_type, 0);
-        q = cdrom_put_raw_descriptor(q, session, cdrom_track_adr_control(last),
-                                     0xa1, last->number, 0, 0);
+        cdrom_put_raw_descriptor(buf, size, &len, session,
+                                 cdrom_track_adr_control(first),
+                                 0xa0, first->number, toc->disc_type, 0);
+        cdrom_put_raw_descriptor(buf, size, &len, session,
+                                 cdrom_track_adr_control(last),
+                                 0xa1, last->number, 0, 0);
         lba_to_msf(msf, session == toc->last_session ? toc->leadout
                                                      : last->end + 1);
-        q = cdrom_put_raw_descriptor(q, session, cdrom_track_adr_control(last),
-                                     0xa2, msf[0], msf[1], msf[2]);
+        cdrom_put_raw_descriptor(buf, size, &len, session,
+                                 cdrom_track_adr_control(last),
+                                 0xa2, msf[0], msf[1], msf[2]);
 
         for (const BlockCdTrack *t = first; t <= last; t++) {
             if (t->session != session) {
                 continue;
             }
             lba_to_msf(msf, t->start);
-            q = cdrom_put_raw_descriptor(q, session,
-                                         cdrom_track_adr_control(t),
-                                         t->number, msf[0], msf[1], msf[2]);
+            cdrom_put_raw_descriptor(buf, size, &len, session,
+                                     cdrom_track_adr_control(t),
+                                     t->number, msf[0], msf[1], msf[2]);
         }
     }
 
-    len = q - buf;
     stw_be_p(buf, len - 2);
-    return len;
+    return MIN(len, size);
 }
 
 /* Layout of the user data and its neighbours in a raw sector of a track */
