@@ -451,6 +451,12 @@ static void bebox_init(MachineState *machine)
          * them, starting at 16 MiB; the card's 32 MiB BAR would not decode.
          */
         qdev_prop_set_uint32(DEVICE(vga), "bar0-mb", 16);
+        /*
+         * BeOS fills with color-expanding BLTs whose source pitch is 0,
+         * and programs the GD5434's 32 bpp pitch in its double units.
+         */
+        qdev_prop_set_bit(DEVICE(vga), "colorexpand-packed", true);
+        qdev_prop_set_bit(DEVICE(vga), "gd5434-pitch32", true);
         pci_realize_and_unref(vga, pci_bus, &error_fatal);
     }
 
@@ -494,6 +500,18 @@ static void bebox_machine_class_init(ObjectClass *oc, const void *data)
         /* drives of the time had no Ultra DMA; BeOS R4.5 wants MDMA set */
         { "ide-hd", "udma", "off" },
         { "ide-cd", "udma", "off" },
+        /*
+         * The 82378 has the EISA extended mode registers: BeOS sets the
+         * sound codec's channel 6 to 8-bit transfers there.
+         */
+        { "i8257", "ext-mode", "on" },
+        /* the slave 8259's INT drops during the acknowledge */
+        { "isa-i8259", "slave-int-drop", "on" },
+        /* BeOS's sound driver counts on the codec's exact DMA counts */
+        { "cs4231a", "exact-dma", "on" },
+        /* BeOS 1.1 and R4 overwrite the PROM and match their PAR */
+        { "ne2k_isa", "dp8390-rx", "on" },
+        { "ne2k_pci", "dp8390-rx", "on" },
     };
     MachineClass *mc = MACHINE_CLASS(oc);
 
