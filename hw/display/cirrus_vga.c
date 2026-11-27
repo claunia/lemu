@@ -254,8 +254,11 @@ static bool blit_is_unsafe(struct CirrusVGAState *s, bool dst_only)
     /*
      * Color expansion reads its source as packed bits, a whole number of
      * bytes per line, whatever the source pitch: drivers leave it at 0.
+     * Only with colorexpand-packed (the BeBox); others keep the pitch
+     * check below.
      */
-    if (s->cirrus_blt_mode & CIRRUS_BLTMODE_COLOREXPAND) {
+    if (s->colorexpand_packed &&
+        (s->cirrus_blt_mode & CIRRUS_BLTMODE_COLOREXPAND)) {
         int64_t bits = (s->vga.gr[0x2f] & 0x07) +
                        s->cirrus_blt_width / s->cirrus_blt_pixelwidth;
 
@@ -1140,9 +1143,11 @@ static void cirrus_get_params(VGACommonState *s1,
     line_offset <<= 3;
     /*
      * Up to the GD5434, the offset counts in twice the bytes in 32 bpp, as
-     * in 86Box: BeOS programs 0xa0 for 640 pixels of 4 bytes.
+     * in 86Box: BeOS programs 0xa0 for 640 pixels of 4 bytes. Only with
+     * gd5434-pitch32 (the BeBox).
      */
-    if (s->device_id < CIRRUS_ID_CLGD5436 && cirrus_get_bpp(s1) == 32) {
+    if (s->gd5434_pitch32 && s->device_id < CIRRUS_ID_CLGD5436 &&
+        cirrus_get_bpp(s1) == 32) {
         line_offset <<= 1;
     }
     params->line_offset = line_offset;
@@ -3204,6 +3209,10 @@ static const Property pci_vga_cirrus_properties[] = {
     DEFINE_PROP_BOOL("partial-init", struct PCICirrusVGAState,
                      cirrus_vga.vga.partial_init, false),
     DEFINE_PROP_UINT32("bar0-mb", struct PCICirrusVGAState, bar_mb, 32),
+    DEFINE_PROP_BOOL("colorexpand-packed", struct PCICirrusVGAState,
+                     cirrus_vga.colorexpand_packed, false),
+    DEFINE_PROP_BOOL("gd5434-pitch32", struct PCICirrusVGAState,
+                     cirrus_vga.gd5434_pitch32, false),
 };
 
 static void cirrus_vga_class_init(ObjectClass *klass, const void *data)
