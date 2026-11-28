@@ -18,6 +18,7 @@ compiles the same code 15 times, with slightly different features.
 | qemu-system-i386 | nt31x86, nt351x86, nt40x86, aix13ps2, aix13ps2-tcf, dellunix22, dgux420x86, sinixz542 | `../pc/release/pack.sh` |
 | qemu-system-sparc | sunos414 | `../sun4m/release/mkrelease.sh` |
 | qemu-system-m68k | aux311q800 | `../q800/release/mkrelease.sh` |
+| qemu-system-m68k | ns08computer, ns09computer, ns10computer, ns10acomputer, ns20cube, ns21color, ns22computer, ns30station, ns31turbo, ns32cube, ns33station, ns33turbocolor, os40cubeturbo, os42color | `../next/release/mkrelease.sh` |
 
 Run them on an Apple Silicon Mac with Homebrew and Docker. The Linux and
 Windows builds run in Docker.
@@ -80,6 +81,8 @@ what each binary has in `OUT/macos-*.features` and
 
 - MIPS and Alpha: run the machine's `check.sh` on each list, for example
   `sh ../rm200/release/check.sh macos qemu-system-mips64el OUT/macos-qemu-system-mips64el.features`.
+- NeXT: `sh ../next/release/check.sh macos OUT/macos-qemu-system-m68k.features`
+  (and `linux` with the Linux lists) checks what the NeXT kits need.
 - PowerPC has no saved lists yet. Run `features.sh` on the binaries of
   the last kits and compare: `comm -23 OLD NEW` must print nothing.
 - The Windows build is not run. `build-windows.sh` checks the configure
@@ -116,6 +119,7 @@ these folders in place of their own build, for example:
     sh ../hppa/release/mkrelease.sh hpux11v3 VMDIR STAGE/hppa hpux11v3a400-lemu.tar.lz
     sh ../sun4m/release/mkrelease.sh sunos414 VMDIR STAGE/sparc sunos414-lemu.tar.lz
     sh ../q800/release/mkrelease.sh aux311 VMDIR STAGE/m68k aux311q800-lemu.tar.lz
+    sh ../next/release/mkrelease.sh ns33station VMDIR STAGE/m68k ns33station-lemu.tar.lz
 
 - `VMDIR`, `SRCDIR` and `KITDIR` hold the guest files: disk, NVRAM and
   firmware. See each machine's notes.

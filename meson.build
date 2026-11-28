@@ -3767,6 +3767,7 @@ if have_system or have_user
     'target/i386/kvm',
     'target/i386/whpx',
     'target/loongarch',
+    'target/m68k',
     'target/mips/tcg',
     'target/ppc',
     'target/riscv',

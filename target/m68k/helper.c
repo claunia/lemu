@@ -2,6 +2,7 @@
  *  m68k op helpers
  *
  *  Copyright (c) 2006-2007 CodeSourcery
+ *  Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *  Written by Paul Brook
  *
  * This library is free software; you can redistribute it and/or
@@ -281,8 +282,15 @@ void HELPER(m68k_movec_to)(CPUM68KState *env, uint32_t reg, uint32_t val)
             return;
         }
         break;
-    /* Unimplemented Registers */
     case M68K_CR_CAAR:
+        /* 68020/68030 cache address register: there is no cache */
+        if (m68k_feature(env, M68K_FEATURE_M68020) ||
+            m68k_feature(env, M68K_FEATURE_M68030)) {
+            env->caar = val;
+            return;
+        }
+        break;
+    /* Unimplemented Registers */
     case M68K_CR_PCR:
     case M68K_CR_BUSCR:
         cpu_abort(env_cpu(env),
@@ -385,8 +393,13 @@ uint32_t HELPER(m68k_movec_from)(CPUM68KState *env, uint32_t reg)
             return env->mmu.ttr[M68K_DTTR1];
         }
         break;
-    /* Unimplemented Registers */
     case M68K_CR_CAAR:
+        if (m68k_feature(env, M68K_FEATURE_M68020) ||
+            m68k_feature(env, M68K_FEATURE_M68030)) {
+            return env->caar;
+        }
+        break;
+    /* Unimplemented Registers */
     case M68K_CR_PCR:
     case M68K_CR_BUSCR:
         cpu_abort(env_cpu(env), "Unimplemented control register read 0x%x\n",
@@ -925,6 +938,15 @@ bool m68k_cpu_translate_for_debug(CPUState *cs, vaddr addr,
     int access_type;
     target_ulong page_size;
 
+    if (m68k_feature(env, M68K_FEATURE_M68030)) {
+        if (!m68k_mmu030_get_phys(env, addr, ACCESS_DATA | ACCESS_DEBUG |
+                                  ((env->sr & SR_S) ? ACCESS_SUPER : 0),
+                                  &phys_addr)) {
+            return false;
+        }
+        goto success;
+    }
+
     if ((env->mmu.tcr & M68K_TCR_ENABLED) == 0) {
         /* MMU disabled */
         phys_addr = addr;
@@ -980,6 +1002,11 @@ bool m68k_cpu_tlb_fill(CPUState *cs, vaddr address, int size,
     int access_type;
     int ret;
     target_ulong page_size;
+
+    if (m68k_feature(env, M68K_FEATURE_M68030)) {
+        return m68k_mmu030_tlb_fill(cs, address, size, qemu_access_type,
+                                    mmu_idx, probe, retaddr);
+    }
 
     if ((env->mmu.tcr & M68K_TCR_ENABLED) == 0) {
         /* MMU disabled */

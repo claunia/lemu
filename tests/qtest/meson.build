@@ -176,6 +176,7 @@ qtests_loongarch64 = qtests_filter + \
    'migration-test']
 
 qtests_m68k = ['boot-serial-test'] + \
+  (config_all_devices.has_key('CONFIG_NEXTCUBE') ? ['next-test'] : []) + \
   qtests_filter
 
 qtests_microblaze = ['boot-serial-test'] + \
