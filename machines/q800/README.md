@@ -178,5 +178,12 @@ the disk, checked by MD5 on the host afterwards.
   MFM DD disk as two-sided, as on a real Mac. The Finders of System 7.1
   to 8.1 with PC Exchange offer no 400K format for a SuperDrive; the
   A/UX Finder does (One-Sided).
-- At start-up the ROM looks at a floppy in the drive and ejects it when
-  it does not boot from it. Booting from a floppy is not tested yet.
+- **Booting from a floppy** works: System 7.5.3 starts from its
+  Install Disk 1 and from Disk Tools 1, and installs from all 16
+  install floppies onto an empty SCSI disk (Apple HD SC Setup on Disk
+  Tools 1 initializes it). Give the install disks as read-only, as real
+  ones are locked. A floppy that is not a start-up disk is ejected by
+  the ROM at start-up.
+- Apple HD SC Setup sizes its partition for the 20 MB drive the q800
+  SCSI disk claims to be (a Seagate ST225N). Grow the partition and its
+  HFS volume afterwards, or use a disk made elsewhere.
