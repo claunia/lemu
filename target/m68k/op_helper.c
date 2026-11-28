@@ -290,7 +290,8 @@ static void m68k_interrupt_all(CPUM68KState *env, int is_hw)
     sr &= ~SR_T;
     /* "sets the processor interrupt mask" */
     if (is_hw) {
-        sr |= (env->sr & ~SR_I) | (env->pending_level << SR_I_SHIFT);
+        /* only the mask: env->sr still has the trace bits cleared above */
+        sr = (sr & ~SR_I) | (env->pending_level << SR_I_SHIFT);
     }
     cpu_m68k_set_sr(env, sr);
     sp = env->aregs[7];

@@ -3,6 +3,7 @@
  *
  *  Copyright (c) 2005-2007 CodeSourcery
  *  Written by Paul Brook
+ *  Copyright (c) 2026 Natalia Portillo <claunia@claunia.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -110,6 +111,7 @@ typedef struct DisasContext {
     int writeback_mask;
     TCGv writeback[8];
     bool ss_active;
+    TCGv packed_k;      /* k-factor of an FMOVE.P to memory */
 } DisasContext;
 
 static TCGv get_areg(DisasContext *s, unsigned regno)
@@ -958,11 +960,21 @@ static void gen_load_fp(DisasContext *s, int opsize, TCGv addr, TCGv_ptr fp,
         tcg_gen_st_i64(t64, fp, offsetof(FPReg, l.lower));
         break;
     case OS_PACKED:
-        /*
-         * unimplemented data type on 68040/ColdFire
-         * FIXME if needed for another FPU
-         */
-        gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+        if (!m68k_feature(s->env, M68K_FEATURE_FPU_PACKED)) {
+            gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+            break;
+        }
+        {
+            TCGv w1 = tcg_temp_new();
+            TCGv w2 = tcg_temp_new();
+
+            tcg_gen_qemu_ld_tl(tmp, addr, index, MO_TEUL);
+            tcg_gen_addi_i32(w1, addr, 4);
+            tcg_gen_qemu_ld_tl(w1, w1, index, MO_TEUL);
+            tcg_gen_addi_i32(w2, addr, 8);
+            tcg_gen_qemu_ld_tl(w2, w2, index, MO_TEUL);
+            gen_helper_frompacked(tcg_env, fp, tmp, w1, w2);
+        }
         break;
     default:
         g_assert_not_reached();
@@ -1005,11 +1017,23 @@ static void gen_store_fp(DisasContext *s, int opsize, TCGv addr, TCGv_ptr fp,
         tcg_gen_qemu_st_i64(t64, tmp, index, MO_TEUQ);
         break;
     case OS_PACKED:
-        /*
-         * unimplemented data type on 68040/ColdFire
-         * FIXME if needed for another FPU
-         */
-        gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+        if (!m68k_feature(s->env, M68K_FEATURE_FPU_PACKED)) {
+            gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+            break;
+        }
+        gen_helper_topacked(tcg_env, fp, s->packed_k);
+        for (int i = 0; i < 3; i++) {
+            tcg_gen_ld_i32(tmp, tcg_env,
+                           offsetof(CPUM68KState, fp_packed[i]));
+            if (i) {
+                TCGv a = tcg_temp_new();
+
+                tcg_gen_addi_i32(a, addr, 4 * i);
+                tcg_gen_qemu_st_tl(tmp, a, index, MO_TEUL);
+            } else {
+                tcg_gen_qemu_st_tl(tmp, addr, index, MO_TEUL);
+            }
+        }
         break;
     default:
         g_assert_not_reached();
@@ -1137,11 +1161,17 @@ static int gen_ea_mode_fp(CPUM68KState *env, DisasContext *s, int mode,
                 tcg_gen_st_i64(t64, fp, offsetof(FPReg, l.lower));
                 break;
             case OS_PACKED:
-                /*
-                 * unimplemented data type on 68040/ColdFire
-                 * FIXME if needed for another FPU
-                 */
-                gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+                if (!m68k_feature(s->env, M68K_FEATURE_FPU_PACKED)) {
+                    gen_exception(s, s->base.pc_next, EXCP_FP_UNIMP);
+                    break;
+                }
+                {
+                    TCGv w0 = tcg_constant_i32(read_im32(env, s));
+                    TCGv w1 = tcg_constant_i32(read_im32(env, s));
+                    TCGv w2 = tcg_constant_i32(read_im32(env, s));
+
+                    gen_helper_frompacked(tcg_env, fp, w0, w1, w2);
+                }
                 break;
             default:
                 g_assert_not_reached();
@@ -4954,7 +4984,16 @@ DISAS_INSN(fpu)
         break;
     case 3: /* fmove out */
         cpu_src = gen_fp_ptr(REG(ext, 7));
-        opsize = ext_opsize(ext, 10);
+        if (((ext >> 10) & 7) == 7) {
+            /* packed, with the k-factor in a data register */
+            opsize = OS_PACKED;
+            s->packed_k = tcg_temp_new();
+            tcg_gen_sextract_i32(s->packed_k, cpu_dregs[(ext >> 4) & 7],
+                                 0, 7);
+        } else {
+            opsize = ext_opsize(ext, 10);
+            s->packed_k = tcg_constant_i32(sextract32(ext, 0, 7));
+        }
         if (gen_ea_fp(env, s, insn, opsize, cpu_src,
                       EA_STORE, IS_USER(s)) == -1) {
             gen_addr_fault(s);

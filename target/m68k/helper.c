@@ -890,6 +890,14 @@ static int get_physical_address(CPUM68KState *env, hwaddr *physical,
         if (access_type & ACCESS_STORE) {
             return -1;
         }
+    } else if (!(access_type & ACCESS_STORE) &&
+               !(next & M68K_DESC_MODIFIED) && !debug) {
+        /*
+         * Not written yet: keep the page read-only in the TLB, so that the
+         * first write comes back here and sets the modified bit. Else the
+         * guest takes the page for clean and drops what was written to it.
+         */
+        *prot &= ~PAGE_WRITE;
     }
     if (next & M68K_DESC_SUPERONLY) {
         if ((access_type & ACCESS_SUPER) == 0) {
