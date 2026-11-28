@@ -86,6 +86,7 @@ struct AstroState {
     uint8_t phys_addr_bits;
     bool rotate_pci_pins;       /* PCI INTx pin rotation (A400) */
     bool elroy1_on_rope2;       /* second Elroy on rope 2 (A400) */
+    bool pluto;                 /* show as a Pluto (zx1) SBA: IOC at 0x2000 */
 
     struct ElroyState *elroy[ELROY_NUM];
 
@@ -97,6 +98,10 @@ struct AstroState {
 
     IOMMUMemoryRegion iommu;
     AddressSpace iommu_as;
+
+    /* PCI writes to 0xfee00000-0xfeefffff: interrupt transactions */
+    MemoryRegion int_txn;
+    AddressSpace int_txn_as;
 };
 
 #endif

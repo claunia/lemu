@@ -5635,7 +5635,18 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
         {
             const TCGOutOpDeposit *out = &outop_deposit;
 
-            if (const_args[2]) {
+            if (const_args[1] && const_args[2]) {
+                /*
+                 * The register allocator can know both inputs as
+                 * constants when the optimizer did not fold them, e.g. a
+                 * global set to a constant before a label that was
+                 * removed later.  out_rri would take the constant in
+                 * new_args[1] as a register number.
+                 */
+                tcg_out_movi(s, type, new_args[0],
+                             deposit64(new_args[1], new_args[3],
+                                       new_args[4], new_args[2]));
+            } else if (const_args[2]) {
                 tcg_debug_assert(!const_args[1]);
                 out->out_rri(s, type, new_args[0], new_args[1],
                              new_args[2], new_args[3], new_args[4]);

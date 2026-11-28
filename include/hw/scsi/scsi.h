@@ -4,6 +4,7 @@
 #include "qemu/aiocb.h"
 #include "qemu/aio.h"
 #include "hw/block/block.h"
+#include "block/cdrom-image.h"
 #include "hw/core/qdev.h"
 #include "scsi/utils.h"
 #include "qemu/notify.h"
@@ -122,14 +123,29 @@ extern const VMStateDescription vmstate_scsi_device;
 /* cdrom.c */
 int cdrom_read_toc(int nb_sectors, uint8_t *buf, int msf, int start_track);
 int cdrom_read_toc_raw(int nb_sectors, uint8_t *buf, int msf, int session_num);
-int cdrom_read_toc_tracks(int nb_sectors, uint8_t *buf, int msf,
+/* Discs made of data tracks that start at @starts (the tracks property) */
+int cdrom_read_toc_starts(int nb_sectors, uint8_t *buf, int msf,
                           int start_track, const uint32_t *starts,
                           int ntracks);
-int cdrom_read_toc_raw_tracks(int nb_sectors, uint8_t *buf, int msf,
+int cdrom_read_toc_raw_starts(int nb_sectors, uint8_t *buf, int msf,
                               int session_num, const uint32_t *starts,
                               int ntracks);
 bool cdrom_parse_tracks(const char *tracks, uint32_t **starts, int *ntracks,
                         Error **errp);
+/* Discs with a real track list (block/cdrom-image.h) */
+int cdrom_read_toc_tracks(const BlockCdToc *toc, uint8_t *buf, int msf,
+                          int start_track);
+int cdrom_read_session_info(const BlockCdToc *toc, uint8_t *buf, int msf);
+/* Writes at most @size bytes; returns the bytes written */
+int cdrom_read_toc_raw_tracks(const BlockCdToc *toc, uint8_t *buf, int size);
+/* READ CD: @fields is byte 9 of the command, @sub its subchannel selection */
+bool cdrom_read_cd_type_matches(const BlockCdTrack *t, int expected);
+int cdrom_read_cd_sector_size(const BlockCdTrack *t, uint8_t fields,
+                              uint8_t sub);
+void cdrom_read_cd_format(uint8_t *out, const uint8_t *raw,
+                          const uint8_t *subchannel, const BlockCdToc *toc,
+                          const BlockCdTrack *t, int64_t lba, uint8_t fields,
+                          uint8_t sub);
 
 /* scsi-bus.c */
 struct SCSIReqOps {

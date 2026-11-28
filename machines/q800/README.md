@@ -54,7 +54,8 @@ power-off, so QEMU keeps running: quit it then.
 
 ## Tested
 
-The kit of 2026-11-14 on an Apple Silicon Mac:
+The kit of 2026-11-14 on an Apple Silicon Mac (the kit of 2026-11-26
+is the same, with Archaic in `/usr/local/bin`):
 
 - The Finder comes up about 35 s after QEMU starts, logged in as root.
 - Idle, QEMU uses about 2% of one host core: the 68040 is halted 99% of
@@ -80,6 +81,9 @@ The kit of 2026-11-14 on an Apple Silicon Mac:
    and `.bash_history`, `/etc/wtmp` and `/etc/utmp` (`> file`), core
    files, and the logs of programs that talked to the LAN. Keep only
    `localhost` and the guest's own name (`aux`) in `/etc/hosts`.
+   To copy files in with rcp (port 31514), A/UX's rshd needs a name for
+   192.168.1.10 in `/etc/hosts` (with `restrict=on` it can't ask DNS):
+   add a line for the copy, and take it out again before the shutdown.
 3. Shut down as above, quit QEMU, then zero the free space of `/`:
    `python3 -I release/ffszero.py root.img 1272096 --write` (the start
    sector of the root partition; the tool checks the file system first).

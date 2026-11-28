@@ -83,6 +83,10 @@ static uint64_t pic1_read(void *opaque, hwaddr addr, unsigned size)
                 return 0x00;
             }
             s->pic.isr |= (1 << irq);
+            /* A poll is an acknowledge: it takes the request of an edge IRQ */
+            if (!(s->pic.elcr & (1 << irq))) {
+                s->pic.irr &= ~(1 << irq);
+            }
             pic_update_irq(s);
             return 0x80 | irq;
         }
@@ -113,7 +117,12 @@ static void pic1_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
     if (v & 0x10) {
         s->pic.init_phase = 1;
         s->pic.imr = 0xFF;
-        s->pic.irr = 0;
+        /*
+         * ICW1 resets the edge detector: an edge IRQ that is high now
+         * must go low and high again. ICW1.LTIM is ignored by this chip;
+         * only the ELCR (config 67h) selects level triggering.
+         */
+        s->pic.irr = s->pic.line & s->pic.elcr;
         s->pic.isr = 0;
         s->pic.poll_mode = false;
         s->pic.priority_base = 7;
@@ -166,11 +175,35 @@ static const MemoryRegionOps pc87560_pic1_ops = {
 static void pc87560_pic_irq_in(void *opaque, int irq_n, int level)
 {
     PC87560SuperioState *s = opaque;
-    if (level) {
-        s->pic.irr |=  (1 << irq_n);
-    } else {
-        s->pic.irr &= ~(1 << irq_n);
+    uint8_t mask = 1 << irq_n;
+
+    if (s->pic.elcr & mask) {
+        /* level triggered: the request follows the line */
+        if (level) {
+            s->pic.irr |= mask;
+        } else {
+            s->pic.irr &= ~mask;
+        }
+    } else if (level && !(s->pic.line & mask)) {
+        /* edge triggered: only a rising edge makes a request */
+        s->pic.irr |= mask;
     }
+    if (level) {
+        s->pic.line |= mask;
+    } else {
+        s->pic.line &= ~mask;
+    }
+    pic_update_irq(s);
+}
+
+/* ELCR 1, config 67h: bit n = 1 makes IRQ n level triggered; 0 and 2 are reserved */
+#define PC87560_ELCR_MASK 0xfa
+
+static void pc87560_update_elcr(PC87560SuperioState *s)
+{
+    s->pic.elcr = PCI_DEVICE(s)->config[REG_IRQ_TRIG] & PC87560_ELCR_MASK;
+    /* a level IRQ requests while its line is high */
+    s->pic.irr = (s->pic.irr & ~s->pic.elcr) | (s->pic.line & s->pic.elcr);
     pic_update_irq(s);
 }
 
@@ -344,6 +377,10 @@ static void pc87560_superio_config_write(PCIDevice *pci,
         uint32_t pb = pci_get_long(pci->config + REG_PMBAR);
         pc87560_map_region(s, &s->pm_io, &s->pm_mapped,
                            (pb & 1) ? (pb & ~(hwaddr)0xFF) : 0);
+    }
+
+    if (ranges_overlap(addr, len, REG_IRQ_TRIG, 1)) {
+        pc87560_update_elcr(s);
     }
 
     if (ranges_overlap(addr, len, REG_RSVD_CFG, 1)) {
