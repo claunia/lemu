@@ -107,6 +107,13 @@ static const Property pci_props[] = {
     DEFINE_PROP_STRING("sriov-pf", PCIDevice, sriov_pf),
     DEFINE_PROP_BIT("x-pcie-ext-tag", PCIDevice, cap_present,
                     QEMU_PCIE_EXT_TAG_BITNR, true),
+    /*
+     * Old PC BIOSes set Bus Master on every PCI card, and some drivers
+     * (DG/UX dpen) never set it themselves. SeaBIOS sets it only on the
+     * cards it boots from, so this sets it at reset.
+     */
+    DEFINE_PROP_BIT("bios-bus-master", PCIDevice, cap_present,
+                    QEMU_PCI_BIOS_BUS_MASTER_BITNR, false),
     { .name = "busnr", .info = &prop_pci_busnr },
 };
 
@@ -589,6 +596,11 @@ static void pci_do_device_reset(PCIDevice *dev)
                               pci_get_word(dev->wmask + PCI_INTERRUPT_LINE) |
                               pci_get_word(dev->w1cmask + PCI_INTERRUPT_LINE));
     dev->config[PCI_CACHE_LINE_SIZE] = 0x0;
+    if (dev->cap_present & QEMU_PCI_BIOS_BUS_MASTER) {
+        pci_word_test_and_set_mask(dev->config + PCI_COMMAND,
+                                   PCI_COMMAND_MASTER);
+        pci_set_master(dev, dev->enabled);
+    }
     /* Default PM state is D0 */
     if (dev->cap_present & QEMU_PCI_CAP_PM) {
         pci_word_test_and_clear_mask(dev->config + dev->pm_cap + PCI_PM_CTRL,

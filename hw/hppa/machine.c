@@ -49,6 +49,7 @@ struct HppaMachineState {
     bool legacy_fw;
     bool hpux_idle;
     bool hpux_x11_pace;
+    bool sba_pluto;
 };
 
 #define MIN_SEABIOS_HPPA_VERSION 26 /* require at least this fw version */
@@ -257,6 +258,12 @@ static FWCfgState *create_fw_cfg(MachineState *ms, PCIBus *pci_bus,
     val = cpu_to_le64(hpm->memsplit_addr);
     fw_cfg_add_file(fw_cfg, "/etc/hppa/memsplit-addr",
                     g_memdup2(&val, sizeof(val)), sizeof(val));
+
+    if (hpm->sba_pluto) {
+        val = cpu_to_le64(1);
+        fw_cfg_add_file(fw_cfg, "/etc/hppa/sba-pluto",
+                        g_memdup2(&val, sizeof(val)), sizeof(val));
+    }
 
     val = cpu_to_le64(soft_power_reg);
     fw_cfg_add_file(fw_cfg, "/etc/hppa/power-button-addr",
@@ -475,7 +482,12 @@ static void machine_HP_common_init_tail(MachineState *machine, PCIBus *pci_bus,
     if (!lasi_dev && machine->enable_graphics && defaults_enabled()) {
         USBBus *usb_bus;
         if (create_diva) {
-            pci_create_simple(pci_bus, -1, "pci-ohci");
+            /*
+             * HP-UX 11.31 (pluto) takes only some OHCIs, such as the NEC
+             * uPD720101 of the rp34x0, not the Apple one.
+             */
+            pci_create_simple(pci_bus, -1,
+                              hpm->sba_pluto ? "nec-usb-ohci" : "pci-ohci");
         }
         usb_bus = USB_BUS(object_resolve_type_unambiguous(TYPE_USB_BUS,
                                                           &error_abort));
@@ -811,7 +823,7 @@ static void machine_HP_B160L_init(MachineState *machine)
     machine_HP_common_init_tail(machine, pci_bus, translate, false);
 }
 
-static AstroState *astro_init(bool is_a400)
+static AstroState *astro_init(bool is_a400, bool pluto)
 {
     DeviceState *dev;
 
@@ -823,6 +835,7 @@ static AstroState *astro_init(bool is_a400)
                              &error_abort);
     object_property_set_bool(OBJECT(dev), "elroy1-on-rope2", is_a400,
                              &error_abort);
+    object_property_set_bool(OBJECT(dev), "pluto", pluto, &error_abort);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
     return ASTRO_CHIP(dev);
@@ -851,7 +864,7 @@ static void machine_HP_C3700_init(MachineState *machine)
     }
 
     /* Init Astro and the Elroys (PCI host bus chips).  */
-    astro = astro_init(!is_C3700);
+    astro = astro_init(!is_C3700, HPPA_COMMON_MACHINE(machine)->sba_pluto);
     astro_dev = DEVICE(astro);
     memory_region_add_subregion(addr_space, translate(NULL, ASTRO_HPA),
                                 sysbus_mmio_get_region(
@@ -885,7 +898,10 @@ static void machine_HP_C3700_init(MachineState *machine)
 
     /* SCSI disk setup. */
     if (drive_get_max_bus(IF_SCSI) >= 0) {
-        DeviceState *dev = DEVICE(pci_create_simple(pci_bus, -1, "lsi53c895a"));
+        /* HP-UX 11.31 (the Pluto A400) has no driver for the 53C895A */
+        DeviceState *dev = DEVICE(pci_create_simple(pci_bus, -1,
+                               HPPA_COMMON_MACHINE(machine)->sba_pluto ?
+                               "lsi53c875" : "lsi53c895a"));
         lsi53c8xx_handle_legacy_cmdline(dev);
     }
 
@@ -1014,6 +1030,16 @@ static void hppa_set_hpux_x11_pace(Object *obj, bool value, Error **errp)
     HPPA_COMMON_MACHINE(obj)->hpux_x11_pace = value;
 }
 
+static bool hppa_get_sba_pluto(Object *obj, Error **errp)
+{
+    return HPPA_COMMON_MACHINE(obj)->sba_pluto;
+}
+
+static void hppa_set_sba_pluto(Object *obj, bool value, Error **errp)
+{
+    HPPA_COMMON_MACHINE(obj)->sba_pluto = value;
+}
+
 static void hppa_machine_instance_init(Object *obj)
 {
     HPPA_COMMON_MACHINE(obj)->hpux_idle = true;
@@ -1067,6 +1093,12 @@ static void HP_B160L_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->default_ram_size = 512 * MiB;
 }
 
+/* HP-UX 11.23 c8xx SCRIPTS select a target twice and tag no-data commands. */
+static GlobalProperty hppa_astro_compat[] = {
+    { "lsi53c895a", "select-continue", "on" },
+    { "lsi53c895a", "wait-complete", "on" },
+};
+
 static void HP_C3700_machine_init_class_init(ObjectClass *oc, const void *data)
 {
     static const char * const valid_cpu_types[] = {
@@ -1081,6 +1113,8 @@ static void HP_C3700_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->init = machine_HP_C3700_init;
     mc->max_cpus = HPPA_MAX_CPUS;
     mc->default_ram_size = 1024 * MiB;
+    compat_props_add(mc->compat_props, hppa_astro_compat,
+                     G_N_ELEMENTS(hppa_astro_compat));
 }
 
 static void HP_A400_machine_init_class_init(ObjectClass *oc, const void *data)
@@ -1097,6 +1131,13 @@ static void HP_A400_machine_init_class_init(ObjectClass *oc, const void *data)
     mc->init = machine_HP_A400_init;
     mc->max_cpus = HPPA_MAX_CPUS;
     mc->default_ram_size = 1024 * MiB;
+    compat_props_add(mc->compat_props, hppa_astro_compat,
+                     G_N_ELEMENTS(hppa_astro_compat));
+
+    object_class_property_add_bool(oc, "pluto", hppa_get_sba_pluto,
+                                   hppa_set_sba_pluto);
+    object_class_property_set_description(oc, "pluto",
+        "Show the Astro as a Pluto (zx1) SBA, as HP-UX 11.31 wants");
 }
 
 static void HP_715_machine_init_class_init(ObjectClass *oc, const void *data)

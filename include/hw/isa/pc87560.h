@@ -58,6 +58,8 @@ typedef struct {
     uint8_t imr;       /* interrupt mask register (OCW1) */
     uint8_t irr;       /* interrupt request register    */
     uint8_t isr;       /* in-service register           */
+    uint8_t line;      /* level of each IRQ input now   */
+    uint8_t elcr;      /* 1 = level triggered, 0 = edge */
     bool    poll_mode; /* OCW3 POLL bit set             */
     bool    read_isr;  /* OCW3: true=ISR, false=IRR     */
     int     init_phase;/* 0=normal, 1-3=ICW2/3/4 expected */

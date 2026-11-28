@@ -75,6 +75,7 @@ blobs = [
   'edk2-licenses.txt',
   'hppa-firmware.img',
   'hppa-firmware64.img',
+  'hppa-sti-artist.rom',
   'hexagon_booter_qcs6490_cdsp',
   'hexagon_loadlinux_qcs6490_cdsp',
   'hexagon_booter_sm8975_nsp',

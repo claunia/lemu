@@ -31,6 +31,8 @@
 #define PCI_DEVICE_ID_ATI_RAGE128_PF 0x5046
 /* Radeon RV100 (VE) */
 #define PCI_DEVICE_ID_ATI_RADEON_QY 0x5159
+/* Radeon 7500 (RV200), emulated as the RV100 */
+#define PCI_DEVICE_ID_ATI_RADEON_QW 0x5157
 /* Radeon ES1000 (RN50), a server RV100 with one CRTC */
 #define PCI_DEVICE_ID_ATI_RADEON_ES1000 0x515e
 /* Mobility Radeon 9000 (M9), an RV250, on the Sam440ep */
@@ -49,6 +51,8 @@ OBJECT_DECLARE_SIMPLE_TYPE(ATIVGAState, ATI_VGA)
 
 typedef struct ATIVGARegs {
     uint32_t mm_index;
+    uint32_t clock_cntl_index;
+    uint32_t pll[64];
     uint32_t bios_scratch[8];
     uint32_t gen_int_cntl;
     uint32_t gen_int_status;
@@ -218,7 +222,6 @@ struct ATIVGAState {
     uint32_t vis_lo, vis_hi;
     int vis_xm;
     uint32_t *mmregs;   /* registers that are only stored */
-    uint32_t pll[0x40]; /* the PLL registers of the R100 and R200 */
 };
 
 /* the R200 family: the Mobility M9 and the Radeon 9250 */
@@ -233,9 +236,10 @@ static inline bool ati_is_r200(ATIVGAState *s)
  * command processor, the 3D engine, the surfaces and byte swap model, the
  * memory controller's address map, the frame timer that always runs and
  * the registers that read back what was written: the AmigaOS and MorphOS
- * drivers they were made for need them. The Rage 128 and the ES1000 keep
- * the behaviour they had before, as we do not know that their guests (AIX
- * on the ES1000) would work with it.
+ * drivers they were made for need them. The Rage 128, the ES1000 and the
+ * Radeon 7500 (rv200) keep the behaviour they had before, as we do not know
+ * that their guests (AIX on the ES1000, HP-UX 11.31 on the Radeon 7500)
+ * would work with it.
  */
 static inline bool ati_is_r100_r200(ATIVGAState *s)
 {

@@ -3,7 +3,7 @@ Windows NT 3.51 Workstation (build 1057, SP5) for PowerPC on QEMU's IBM 40P (PRe
 Run ./run.sh (macOS 26+ arm64, Linux x86_64/aarch64 with glibc 2.34+ and X11/XWayland) or run.cmd (Windows 10+ x64).
 The ARC menu boots NT by itself after 30 seconds; Enter boots it at once.
 NT logs on automatically as Administrator (password: password). Extra QEMU options are passed through, e.g. ./run.sh -display vnc=:1.
-Mouse: no vmmouse driver, so QEMU grabs the mouse when you click in the window. Ctrl-Alt-G lets it go.
+Mouse: the vmmouse driver (LEMU machines/vmmouse) is installed, so the pointer moves in and out of the window without a grab. NT 3.51 has no wheel support.
 The QEMU monitor is in the terminal: sendkey ctrl-alt-delete, change cd0 file.iso (E: in NT), change fd0 file.img.
 The screen is 1280x1024 with 65536 colours (Weitek P9100, NT's weitekp9 driver). 16.7 million colours shows wrong colours.
 NT is in C:\WINNT35 (NTFS). D: is the 5 MB FAT system partition.

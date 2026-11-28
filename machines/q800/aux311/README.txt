@@ -5,6 +5,7 @@ The Quadra starts from its ROM (Quadra800.rom, Apple's), the Mac OS partition st
 Shells: CommandShell in the Apple menu, telnet localhost 31123, or rsh port 31514 on this host. Log in as root, no password; at TERM = (vt100) press Return. Both ports listen on this computer only.
 Installed in /usr/local/bin: gcc 2.8.1 (gcc, g++; gcc 2.7.2 is gcc272), GNU make 3.79 (gmake), bash, vim 5.8, MicroEMACS 4.00 (me), joe, pico, pine, wget, curl, ncftp 3.2.6, screen and top. The X11 programs are in /usr/bin/X11. /opt/jagubox and /opt/nleymann hold archives of more A/UX software.
 X11: start MacX, an X server that runs as a Mac program, from the Apple menu, and answer OK when it asks about memory. Then in a shell: DISPLAY=127.0.0.1:0; export DISPLAY; /usr/bin/X11/xterm &
+Web: Archaic (github.com/tenox7/archaic), a browser for WRP (github.com/tenox7/wrp). Start wrp on this computer (port 8080), then in CommandShell: /usr/local/bin/archaic. It finds WRP at 192.168.1.10:8080, this computer as A/UX sees it. Type an address in its box and press Return; Cmd-Q quits.
 SimCity for X11 (DUX Software, 1994), built here from the Micropolis source: with MacX running and DISPLAY set, cd /usr/SimCity; ./SimCity, or ./SimCity cities/kowloon.cty to start with a city.
 Click in the QEMU window to grab the mouse; Ctrl-Alt-G (Ctrl-Option-G on a Mac) lets it go.
 Extra QEMU options are passed through, e.g. ./run.sh -display vnc=127.0.0.1:1.

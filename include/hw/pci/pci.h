@@ -233,6 +233,9 @@ enum {
     QEMU_PCI_CAP_PM = (1 << QEMU_PCI_CAP_PM_BITNR),
 #define QEMU_PCI_SKIP_RESET_ON_CPR_BITNR 15
     QEMU_PCI_SKIP_RESET_ON_CPR = (1 << QEMU_PCI_SKIP_RESET_ON_CPR_BITNR),
+    /* Bus Master is on after reset, as old PC BIOSes left it */
+#define QEMU_PCI_BIOS_BUS_MASTER_BITNR 16
+    QEMU_PCI_BIOS_BUS_MASTER = (1 << QEMU_PCI_BIOS_BUS_MASTER_BITNR),
 };
 
 typedef struct PCIINTxRoute {

@@ -30,6 +30,11 @@ config VMW_PVSCSI_SCSI_PCI
     depends on PCI
     select SCSI
 
+config AHA154X
+    bool
+    depends on ISA_BUS
+    select SCSI
+
 config ESP
     bool
     select SCSI

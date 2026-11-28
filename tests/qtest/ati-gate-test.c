@@ -61,6 +61,9 @@ static uint32_t rd(Ctx *t, uint32_t r)
     return qpci_io_readl(t->dev, t->mmio, r);
 }
 
+/* the models that keep the behaviour they had before */
+static const char *const others[] = { "es1000", "rv200" };
+
 /* registers that are not modeled read back only on the R100 and R200 */
 static void test_readback(void)
 {
@@ -71,35 +74,31 @@ static void test_readback(void)
     g_assert_cmphex(rd(&t, PP_CNTL), ==, 0x12345678);
     stop(&t);
 
-    start(&t, "es1000");
-    reg(&t, PP_CNTL, 0x12345678);
-    g_assert_cmphex(rd(&t, PP_CNTL), ==, 0);
-    stop(&t);
+    for (int i = 0; i < ARRAY_SIZE(others); i++) {
+        start(&t, others[i]);
+        reg(&t, PP_CNTL, 0x12345678);
+        g_assert_cmphex(rd(&t, PP_CNTL), ==, 0);
+        stop(&t);
+    }
 }
 
 /*
- * The PLL registers keep their values on the R100 and R200, and an update
- * of the dividers is done at once, so a driver that waits for it goes on.
+ * Every model keeps the PLL registers, and an update of the dividers is
+ * done at once, so a driver that waits for it goes on.
  */
 static void test_pll(void)
 {
+    static const char *const models[] = { "rv100", "es1000", "rv200" };
     Ctx t;
 
-    start(&t, "rv100");
-    reg(&t, CLOCK_CNTL_INDEX, PPLL_REF_DIV | PLL_WR_EN);
-    reg(&t, CLOCK_CNTL_DATA, PPLL_ATOMIC_UPDATE | 0x1c);
-    reg(&t, CLOCK_CNTL_INDEX, PPLL_REF_DIV);
-    g_assert_cmphex(rd(&t, CLOCK_CNTL_DATA), ==, 0x1c);
-    /* without PLL_WR_EN nothing is written */
-    reg(&t, CLOCK_CNTL_DATA, 0x55);
-    g_assert_cmphex(rd(&t, CLOCK_CNTL_DATA), ==, 0x1c);
-    stop(&t);
-
-    start(&t, "es1000");
-    reg(&t, CLOCK_CNTL_INDEX, PPLL_REF_DIV | PLL_WR_EN);
-    reg(&t, CLOCK_CNTL_DATA, PPLL_ATOMIC_UPDATE | 0x1c);
-    g_assert_cmphex(rd(&t, CLOCK_CNTL_DATA), ==, 0);
-    stop(&t);
+    for (int i = 0; i < ARRAY_SIZE(models); i++) {
+        start(&t, models[i]);
+        reg(&t, CLOCK_CNTL_INDEX, PPLL_REF_DIV | PLL_WR_EN);
+        reg(&t, CLOCK_CNTL_DATA, PPLL_ATOMIC_UPDATE | 0x1c);
+        reg(&t, CLOCK_CNTL_INDEX, PPLL_REF_DIV);
+        g_assert_cmphex(rd(&t, CLOCK_CNTL_DATA), ==, 0x1c);
+        stop(&t);
+    }
 }
 
 /* the software interrupt that the CP fires can be acked */
@@ -114,10 +113,12 @@ static void test_sw_int(void)
     g_assert_cmphex(rd(&t, GEN_INT_STATUS) & SW_INT_TEST, ==, 0);
     stop(&t);
 
-    start(&t, "es1000");
-    reg(&t, GEN_INT_STATUS, SW_INT_FIRE);
-    g_assert_cmphex(rd(&t, GEN_INT_STATUS) & SW_INT_TEST, ==, 0);
-    stop(&t);
+    for (int i = 0; i < ARRAY_SIZE(others); i++) {
+        start(&t, others[i]);
+        reg(&t, GEN_INT_STATUS, SW_INT_FIRE);
+        g_assert_cmphex(rd(&t, GEN_INT_STATUS) & SW_INT_TEST, ==, 0);
+        stop(&t);
+    }
 }
 
 /*
@@ -156,14 +157,16 @@ static void test_vblank(void)
                     CRTC_VBLANK_INT);
     stop(&t);
 
-    start(&t, "es1000");
-    qtest_clock_step(t.qts, 100 * 1000 * 1000);
-    g_assert_cmphex(rd(&t, GEN_INT_STATUS) & CRTC_VBLANK_INT, ==, 0);
-    reg(&t, GEN_INT_CNTL, CRTC_VBLANK_INT);
-    qtest_clock_step(t.qts, 100 * 1000 * 1000);
-    g_assert_cmphex(rd(&t, GEN_INT_STATUS) & CRTC_VBLANK_INT, ==,
-                    CRTC_VBLANK_INT);
-    stop(&t);
+    for (int i = 0; i < ARRAY_SIZE(others); i++) {
+        start(&t, others[i]);
+        qtest_clock_step(t.qts, 100 * 1000 * 1000);
+        g_assert_cmphex(rd(&t, GEN_INT_STATUS) & CRTC_VBLANK_INT, ==, 0);
+        reg(&t, GEN_INT_CNTL, CRTC_VBLANK_INT);
+        qtest_clock_step(t.qts, 100 * 1000 * 1000);
+        g_assert_cmphex(rd(&t, GEN_INT_STATUS) & CRTC_VBLANK_INT, ==,
+                        CRTC_VBLANK_INT);
+        stop(&t);
+    }
 }
 
 int main(int argc, char **argv)

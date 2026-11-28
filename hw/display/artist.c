@@ -18,6 +18,7 @@
 #include "hw/core/loader.h"
 #include "hw/core/qdev.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/pci/pci_device.h"
 #include "migration/vmstate.h"
 #include "ui/console.h"
 #include "trace.h"
@@ -1654,9 +1655,122 @@ static const TypeInfo artist_info = {
     .class_init    = artist_class_init,
 };
 
+/*
+ * HP VISUALIZE-EG PCI card (A4977A): the Artist chip on a PCI card.
+ * BAR 0 (32 MB) holds the registers at offset 0 and the frame buffer at
+ * 16 MB, the same layout as the Artist at 0xf8000000 on LASI machines.
+ * The expansion ROM holds the STI ROM (PA-RISC code). Its region list
+ * gives offsets in BAR 0: region 0 (the ROM) at 0, the frame buffer at
+ * 16 MB and the registers at 1 MB. So the ROM also shows at the start of
+ * BAR 0, where the Artist has no registers. HP-UX reads it there.
+ */
+#define TYPE_ARTIST_PCI "artist-pci"
+OBJECT_DECLARE_TYPE(ARTISTPCIState, ARTISTPCIClass, ARTIST_PCI)
+
+#define PCI_DEVICE_ID_HP_VISUALIZE_EG 0x1005
+
+struct ARTISTPCIState {
+    PCIDevice parent_obj;
+
+    ARTISTState artist;
+    MemoryRegion bar;
+    MemoryRegion rom_in_bar;
+};
+
+struct ARTISTPCIClass {
+    PCIDeviceClass parent_class;
+
+    DeviceRealize parent_realize;
+};
+
+static void artist_pci_realize(PCIDevice *pdev, Error **errp)
+{
+    ARTISTPCIState *s = ARTIST_PCI(pdev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(&s->artist);
+
+    if (!sysbus_realize(sbd, errp)) {
+        return;
+    }
+
+    memory_region_init(&s->bar, OBJECT(s), "artist-pci.bar", 32 * MiB);
+    memory_region_add_subregion(&s->bar, 0, sysbus_mmio_get_region(sbd, 0));
+    memory_region_add_subregion(&s->bar, 16 * MiB,
+                                sysbus_mmio_get_region(sbd, 1));
+    pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->bar);
+}
+
+/* The PCI core loads the ROM after artist_pci_realize: map it here. */
+static void artist_pci_qdev_realize(DeviceState *dev, Error **errp)
+{
+    ARTISTPCIClass *apc = ARTIST_PCI_GET_CLASS(dev);
+    ARTISTPCIState *s = ARTIST_PCI(dev);
+    PCIDevice *pdev = PCI_DEVICE(dev);
+    ERRP_GUARD();
+
+    apc->parent_realize(dev, errp);
+    if (*errp || !pdev->has_rom) {
+        return;
+    }
+    memory_region_init_alias(&s->rom_in_bar, OBJECT(s), "artist-pci.rom",
+                             &pdev->rom, 0, MIN(pdev->romsize, 1 * MiB));
+    memory_region_add_subregion_overlap(&s->bar, 0, &s->rom_in_bar, 1);
+}
+
+static const VMStateDescription vmstate_artist_pci = {
+    .name = "artist-pci",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_PCI_DEVICE(parent_obj, ARTISTPCIState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+static void artist_pci_init(Object *obj)
+{
+    ARTISTPCIState *s = ARTIST_PCI(obj);
+
+    object_initialize_child(obj, "artist", &s->artist, TYPE_ARTIST);
+    object_property_add_alias(obj, "width", OBJECT(&s->artist), "width");
+    object_property_add_alias(obj, "height", OBJECT(&s->artist), "height");
+}
+
+static void artist_pci_class_init(ObjectClass *klass, const void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    ARTISTPCIClass *apc = ARTIST_PCI_CLASS(klass);
+
+    device_class_set_parent_realize(dc, artist_pci_qdev_realize,
+                                    &apc->parent_realize);
+    k->realize = artist_pci_realize;
+    k->vendor_id = PCI_VENDOR_ID_HP;
+    k->device_id = PCI_DEVICE_ID_HP_VISUALIZE_EG;
+    k->revision = 3;
+    k->class_id = PCI_CLASS_DISPLAY_OTHER;
+    k->romfile = "hppa-sti-artist.rom";
+    dc->desc = "HP VISUALIZE-EG PCI graphics (A4977A)";
+    dc->vmsd = &vmstate_artist_pci;
+    set_bit(DEVICE_CATEGORY_DISPLAY, dc->categories);
+}
+
+static const TypeInfo artist_pci_info = {
+    .name          = TYPE_ARTIST_PCI,
+    .parent        = TYPE_PCI_DEVICE,
+    .instance_size = sizeof(ARTISTPCIState),
+    .instance_init = artist_pci_init,
+    .class_size    = sizeof(ARTISTPCIClass),
+    .class_init    = artist_pci_class_init,
+    .interfaces = (const InterfaceInfo[]) {
+        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { },
+    },
+};
+
 static void artist_register_types(void)
 {
     type_register_static(&artist_info);
+    type_register_static(&artist_pci_info);
 }
 
 type_init(artist_register_types)

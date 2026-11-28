@@ -1745,6 +1745,39 @@ if liblzfse.found() and not cc.links('''
   endif
 endif
 
+# libaaruformat: the system library if it is new enough (it has aaruf_flush), or
+# the bundled CMake subproject, built as a static library.
+aaruformat = not_found
+if get_option('aaruformat').enabled() or (get_option('aaruformat').auto() and have_block)
+  aaruformat = dependency('libaaruformat', required: false)
+  if aaruformat.found() and not cc.has_function('aaruf_flush', prefix: '#include <aaruformat.h>',
+                                                dependencies: aaruformat)
+    aaruformat = not_found
+  endif
+  if not aaruformat.found() and (get_option('wrap_mode') != 'nodownload' or
+                                 fs.is_dir('subprojects/libaaruformat'))
+    aaruformat_cmake_opts = import('cmake').subproject_options()
+    aaruformat_cmake_opts.add_cmake_defines({
+      'BUILD_SHARED_LIBS': false,
+      'AARU_BUILD_PACKAGE': true,
+      'AARU_SYSTEM_ZSTD': zstd.found(),
+      'CMAKE_POSITION_INDEPENDENT_CODE': true,
+    })
+    aaruformat_cmake_opts.set_override_option('werror', 'false')
+    aaruformat_cmake_opts.set_override_option('warning_level', '0')
+    aaruformat_cmake_opts.set_install(false)
+    aaruformat_proj = import('cmake').subproject('libaaruformat',
+                                                 options: aaruformat_cmake_opts,
+                                                 required: get_option('aaruformat'))
+    if aaruformat_proj.found()
+      aaruformat = aaruformat_proj.dependency('aaruformat')
+    endif
+  endif
+  if not aaruformat.found() and get_option('aaruformat').enabled()
+    error('libaaruformat not found, and the subproject could not be used')
+  endif
+endif
+
 oss = not_found
 if get_option('oss').allowed() and have_system
   if not cc.has_header('sys/soundcard.h')
@@ -2460,6 +2493,7 @@ config_host_data.set('CONFIG_POSIX', host_os != 'windows')
 config_host_data.set('CONFIG_WIN32', host_os == 'windows')
 config_host_data.set('CONFIG_LZO', lzo.found())
 config_host_data.set('CONFIG_MPATH', mpathpersist.found())
+config_host_data.set('CONFIG_AARUFORMAT', aaruformat.found())
 config_host_data.set('CONFIG_BLKIO', blkio.found())
 if blkio.found()
   config_host_data.set('CONFIG_BLKIO_VHOST_VDPA_FD',
@@ -3733,6 +3767,7 @@ if have_system or have_user
     'target/i386/kvm',
     'target/i386/whpx',
     'target/loongarch',
+    'target/m68k',
     'target/mips/tcg',
     'target/ppc',
     'target/riscv',
@@ -4956,6 +4991,7 @@ if have_block
   summary_info += {'bochs support':     get_option('bochs').allowed()}
   summary_info += {'cloop support':     get_option('cloop').allowed()}
   summary_info += {'dmg support':       get_option('dmg').allowed()}
+  summary_info += {'AaruFormat support': aaruformat}
   summary_info += {'qcow v1 support':   get_option('qcow1').allowed()}
   summary_info += {'vdi support':       get_option('vdi').allowed()}
   summary_info += {'vhdx support':      get_option('vhdx').allowed()}
